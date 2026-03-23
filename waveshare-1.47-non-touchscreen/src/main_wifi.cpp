@@ -425,7 +425,7 @@ static void drawTitleBar(bool capturing, bool isBLE) {
 
     const char *title;
     if (capturing) title = isBLE ? "BLE CAPTURE"   : "WIFI CAPTURE";
-    else           title = isBLE ? "TAKE BLUE PILL" : "TAKE RED PILL";
+    else           title = isBLE ? "INSERT TOKEN" : "INSERT TOKEN";
 
     static constexpr uint8_t textSize = 2;
     int16_t charW = textSize * 6;
@@ -486,7 +486,7 @@ static void drawStatusBar(bool capturing, bool isBLE) {
 
 static void drawIdleHint(bool isBLE) {
     if ((millis() / 900) % 2 == 0) {
-        const char *hint = isBLE ? "TAKE BLUE PILL" : "PRESS BOOT";
+        const char *hint = isBLE ? "START BLE PCAP" : "START WIFI PCAP";
         int16_t tw = (int16_t)(strlen(hint) * 6);
         g_canvas->setTextSize(1);
         g_canvas->setTextColor(modeColor(isBLE));
