@@ -2,10 +2,11 @@
 // BLE OUI Spoofer — ESP32-C3
 // Tests the sniffer by cycling through target OUIs in two modes.
 //
-// BOOT button  — switch between META (Ray-Ban) and FLOCK (Evil Bird) modes
+// BOOT button  — force switch to FLOCK (Evil Bird) mode immediately
+// Auto-switches to FLOCK after 10 s regardless of current mode.
 // Serial commands (115200):
 //   n / N       — skip to next OUI immediately
-//   m / M       — switch mode (same as BOOT)
+//   m / M       — force switch to FLOCK (same as BOOT)
 //   0 .. 8      — jump directly to that entry index
 //
 
@@ -56,6 +57,7 @@ static bool        g_pending       = false;  // waiting for set_rand_addr callba
 static bool        g_btnLastState  = HIGH;
 static uint32_t    g_btnLastMs     = 0;
 static uint32_t    g_lastStatusMs  = 0;
+static uint32_t    g_flockAt       = 0;   // auto-switch to FLOCK after 10 s
 static uint8_t     g_lastAddr[6]   = {};     // addr set by most recent beginEntry
 
 static esp_ble_adv_params_t adv_params = {
@@ -98,12 +100,13 @@ static void printMenu() {
 
 static void beginEntry(int idx);  // forward decl
 
-static void switchMode() {
-    g_mode    = (g_mode == SpooferMode::META) ? SpooferMode::FLOCK
-                                               : SpooferMode::META;
-    g_current = 0;
+static void switchToFlock() {
+    if (g_mode == SpooferMode::FLOCK) return;  // already there
+    g_mode     = SpooferMode::FLOCK;
+    g_current  = 0;
     g_switchAt = millis() + DWELL_MS;
-    Serial.printf("[mode] switched to %s\n", modeName());
+    g_flockAt  = 0;  // disarm timer
+    Serial.printf("[mode] forced to %s\n", modeName());
     printMenu();
     beginEntry(g_current);
 }
@@ -200,6 +203,7 @@ void setup() {
 
     g_current  = 0;
     g_switchAt = millis() + DWELL_MS;
+    g_flockAt  = millis() + 10000;  // auto-switch to FLOCK after 10 s
     beginEntry(g_current);
 }
 
@@ -213,7 +217,7 @@ void loop() {
     bool btnNow = digitalRead(BOOT_BTN);
     if (btnNow == LOW && g_btnLastState == HIGH && millis() - g_btnLastMs > 50) {
         g_btnLastMs = millis();
-        switchMode();
+        switchToFlock();
     }
     g_btnLastState = btnNow;
 
@@ -226,7 +230,7 @@ void loop() {
             g_switchAt = millis() + DWELL_MS;
             beginEntry(g_current);
         } else if (c == 'm' || c == 'M') {
-            switchMode();
+            switchToFlock();
         } else if (c == '?') {
             printMenu();
         } else if (c >= '0' && c < '0' + currentCount()) {
@@ -246,6 +250,12 @@ void loop() {
             g_lastAddr[0], g_lastAddr[1], g_lastAddr[2],
             g_lastAddr[3], g_lastAddr[4], g_lastAddr[5],
             (unsigned long)remaining);
+    }
+
+    // Auto-switch to FLOCK after 10 s
+    if (g_flockAt && millis() >= g_flockAt) {
+        Serial.println("[mode] 10s elapsed — switching to FLOCK");
+        switchToFlock();
     }
 
     // Auto-cycle within current mode
