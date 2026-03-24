@@ -1,6 +1,26 @@
 # Waveshare 1.47" ESP32-S3 Hybrid Sniffer
 
+> **Forked from [nitekry/invader-sniffer](https://github.com/nitekry/invader-sniffer)** — ported and extended for the [Waveshare ESP32-S3 1.47" display board](https://www.waveshare.com/esp32-s3-lcd-1.47.htm). Credit and thanks to the original author for the core sniffer concept and pixel-art mascot.
+
 A dual-mode WiFi and BLE packet sniffer that captures to PCAP files on an SD card. Built for the Waveshare ESP32-S3 1.47" display board. Features OUI-based target detection with visual and LED alerts, a config web UI, and USB mass storage mode for easy file retrieval.
+
+---
+
+## Legal Disclaimer
+
+**This tool is provided for authorized security research, network diagnostics, and educational purposes only.**
+
+Capturing wireless packets and spoofing MAC/BLE addresses may be illegal without explicit authorization from the network owner and all parties whose data may be captured. Before using this device, you are solely responsible for:
+
+- Obtaining written permission from the owner of any network or device you monitor.
+- Complying with all applicable laws in your jurisdiction, including but not limited to the Electronic Communications Privacy Act (ECPA), the Computer Fraud and Abuse Act (CFAA), the General Data Protection Regulation (GDPR), and equivalent national and regional statutes.
+- Ensuring that use of the BLE spoofer companion does not violate radio spectrum regulations (FCC Part 15, CE RED, or local equivalents) in your country.
+
+Passive promiscuous WiFi capture of 802.11 management and data frames, and BLE advertisement scanning, may expose personally identifiable information (MAC addresses, device names, payload data). Handle all captured data responsibly.
+
+**The authors accept no liability for misuse.** Use of this software in violation of any law is strictly prohibited and entirely your own responsibility.
+
+---
 
 ## Hardware
 
@@ -248,6 +268,45 @@ Dependencies (managed by PlatformIO):
 - `bblanchon/ArduinoJson @ ^7.0.0`
 - `me-no-dev/AsyncTCP @ ^1.1.1`
 - `me-no-dev/ESPAsyncWebServer @ ^1.2.3`
+
+---
+
+## Companion: BLE OUI Spoofer (`spoofer/`)
+
+A separate PlatformIO project for an **ESP32-C3** that spoofs target OUIs over BLE to test the sniffer's detection logic without needing real target hardware.
+
+### Hardware
+
+Any ESP32-C3 dev board (e.g. ESP32-C3-DevKitM-1). Uses the onboard BOOT button (GPIO 9) and USB-CDC serial at 115200.
+
+### What it does
+
+Cycles through all hardcoded target OUIs — Axis camera (FLOCK) and Meta Ray-Ban (META) — advertising each as a BLE non-connectable packet with a static-random address whose top 3 bytes match the spoofed OUI. Each OUI is advertised for 5 seconds before auto-advancing to the next.
+
+### Controls
+
+| Input | Action |
+|-------|--------|
+| BOOT button | Switch between META and FLOCK mode |
+| `n` / `N` | Skip to next OUI immediately |
+| `m` / `M` | Switch mode (same as BOOT) |
+| `0`–`8` | Jump directly to that OUI index |
+| `?` | Print menu / status |
+
+Serial output prints the active OUI, spoofed address, and countdown every 2 seconds.
+
+### Building
+
+```bash
+cd spoofer
+pio run -e spoofer_c3 -t upload
+pio device monitor
+```
+
+### Notes
+
+- The top 2 bits of the first address byte are forced to `11` (static-random BLE address type), matching the masking logic in the sniffer (`ouiByte0()`), so the sniffer will recognise the spoofed address even though those bits are set.
+- The spoofer is for testing only. It transmits real BLE packets.
 
 ---
 
