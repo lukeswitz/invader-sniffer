@@ -13,6 +13,13 @@
 #include "esp_gap_ble_api.h"
 #include "esp_bt_main.h"
 #include "esp_timer.h"
+#include "config.h"
+#include "config_server.h"
+
+static OUIConfig g_ouiConfig;
+static ConfigServer* g_cfgServer = nullptr;
+static volatile bool g_targetHit = false;
+static volatile SpecialHit g_specialType = SpecialHit::NONE;
 
 #define GFX_BL 48
 #define LED_PIN 38
@@ -33,7 +40,9 @@ Arduino_DataBus *bus = new Arduino_ESP32SPI(
 Arduino_GFX *gfx = new Arduino_ST7789(
     bus, 39, 0, false, 172, 320, 34, 0, 34, 0
 );
+
 static Arduino_Canvas *g_canvas = nullptr;
+static int g_connectedClients = 0;
 
 static constexpr int SCREEN_W = 172;
 static constexpr int SCREEN_H = 320;
@@ -127,6 +136,10 @@ struct PacketItem {
     uint8_t channel;
     uint8_t *data;
 };
+
+static void bleScanResultHandler(
+    esp_ble_gap_cb_param_t::ble_scan_result_evt_param *rst
+);
 
 QueueHandle_t g_pktQueue = nullptr;
 
@@ -367,6 +380,37 @@ static const uint16_t CRAB_F1[CRAB_ROWS] = {
     0x104, 0x088, 0x3FE, 0x6DB, 0x7FF, 0x1DC, 0x202, 0x401,
 };
 
+// Evil bird (crow) on perch - frame 0: wings folded
+// col: 0  1  2  3  4  5  6  7  8  9 10
+//  0:  .  .  .  B  B  B  .  .  .  .  .  head
+//  1:  .  .  B  B  B  B  B  .  .  .  .  head wider
+//  2:  .  B  B  B  B  B  B  B  .  .  .  body + wing flat
+//  3:  .  .  B  B  B  B  B  B  B  .  .  body lower
+//  4:  .  .  .  B  B  B  B  .  .  .  .  belly
+//  5:  .  .  .  .  B  B  .  .  .  .  .  tail
+//  6:  .  .  .  .  B  .  B  .  .  .  .  feet
+//  7:  .  .  .  B  B  B  B  B  .  .  .  perch
+static const uint16_t BIRD_F0[CRAB_ROWS] = {
+    0x0E0, 0x1F0, 0x3F8, 0x1FC, 0x0F0, 0x060, 0x050, 0x0F8,
+};
+// Evil bird (crow) on perch - frame 1: wings raised
+//  2:  B  B  B  B  B  B  B  B  .  .  .  wings up
+//  3:  .  .  B  B  B  B  B  B  .  .  .  body lower
+static const uint16_t BIRD_F1[CRAB_ROWS] = {
+    0x0E0, 0x1F0, 0x7F8, 0x1F8, 0x0F0, 0x060, 0x050, 0x0F8,
+};
+
+// Sunglasses - two rectangular lens frames with nose bridge
+// col: 0  1  2  3  4  5  6  7  8  9 10
+//  1:  .  B  B  B  B  .  B  B  B  B  .  top frame
+//  2:  .  B  .  .  B  .  B  .  .  B  .  sides
+//  3:  .  B  .  .  B  B  B  .  .  B  .  bridge
+//  4:  .  B  .  .  B  .  B  .  .  B  .  sides
+//  5:  .  B  B  B  B  .  B  B  B  B  .  bottom frame
+static const uint16_t GLASSES[CRAB_ROWS] = {
+    0x000, 0x3DE, 0x252, 0x272, 0x252, 0x3DE, 0x000, 0x000,
+};
+
 static USBMSC g_msc;
 
 namespace {
@@ -560,6 +604,75 @@ static void drawCrab(bool frame1, bool capturing, bool isBLE) {
             }
         }
     }
+}
+
+static void drawEvilBird(bool frame1, bool capturing, bool isBLE) {
+    const uint16_t *rows = frame1 ? BIRD_F1 : BIRD_F0;
+    const uint16_t color = 0xF800;  // red
+
+    int16_t shake = 0;
+    if (millis() < g_crabShakeTime && g_crabShakeAmount > 0) {
+        shake =
+            (g_crabShakeAmount * (int)(esp_random() % 3)) - g_crabShakeAmount;
+    } else {
+        g_crabShakeAmount = 0;
+    }
+
+    const int16_t x0 = CRAB_CX - (CRAB_COLS * CRAB_SCALE) / 2 + shake;
+    const int16_t y0 = CRAB_CY - (CRAB_ROWS * CRAB_SCALE) / 2;
+
+    for (int row = 0; row < CRAB_ROWS; row++) {
+        uint16_t bits = rows[row];
+        for (int col = 0; col < CRAB_COLS; col++) {
+            if (bits & (1u << (CRAB_COLS - 1 - col))) {
+                g_canvas->fillRect(
+                    x0 + col * CRAB_SCALE,
+                    y0 + row * CRAB_SCALE,
+                    CRAB_SCALE,
+                    CRAB_SCALE,
+                    color
+                );
+            }
+        }
+    }
+
+    // "FLOCK" label above the bird
+    g_canvas->setTextSize(2);
+    g_canvas->setTextColor(0xF800);
+    const char *flock = "FLOCK";
+    int16_t fw = (int16_t)(strlen(flock) * 12);
+    g_canvas->setCursor((SCREEN_W - fw) / 2, y0 - 20);
+    g_canvas->print(flock);
+}
+
+static void drawSunglasses() {
+    const uint16_t color = 0x07FF;  // cyan
+
+    const int16_t x0 = CRAB_CX - (CRAB_COLS * CRAB_SCALE) / 2;
+    const int16_t y0 = CRAB_CY - (CRAB_ROWS * CRAB_SCALE) / 2;
+
+    for (int row = 0; row < CRAB_ROWS; row++) {
+        uint16_t bits = GLASSES[row];
+        for (int col = 0; col < CRAB_COLS; col++) {
+            if (bits & (1u << (CRAB_COLS - 1 - col))) {
+                g_canvas->fillRect(
+                    x0 + col * CRAB_SCALE,
+                    y0 + row * CRAB_SCALE,
+                    CRAB_SCALE,
+                    CRAB_SCALE,
+                    color
+                );
+            }
+        }
+    }
+
+    // "CREEP GLASSES" label above the glasses
+    g_canvas->setTextSize(1);
+    g_canvas->setTextColor(0x07FF);
+    const char *label = "CREEP GLASSES";
+    int16_t lw = (int16_t)(strlen(label) * 6);
+    g_canvas->setCursor((SCREEN_W - lw) / 2, y0 - 12);
+    g_canvas->print(label);
 }
 
 #define STAR_COUNT 80
@@ -854,12 +967,141 @@ static void drawPacketFlash() {
     }
 }
 
+
+void drawWaitingForWiFi() {
+    g_canvas->fillScreen(RGB565_BLACK);
+    
+    g_canvas->setTextSize(2);
+    g_canvas->setTextColor(0x07E0);
+    g_canvas->setCursor(10, 20);
+    g_canvas->print("CONFIG");
+    
+    g_canvas->setTextSize(1);
+    g_canvas->setTextColor(0xFFFF);
+    g_canvas->setCursor(10, 50);
+    g_canvas->print("WiFi: SNIFF-CONFIG");
+    g_canvas->setCursor(10, 62);
+    g_canvas->print("Pass: sniffconfig");
+    
+    g_canvas->setTextColor(0x07E0);
+    g_canvas->setCursor(10, 85);
+    g_canvas->print("http://192.168.4.1");
+    
+    int clients = WiFi.softAPgetStationNum();
+    g_canvas->setTextColor(0xFFFF);
+    g_canvas->setCursor(10, 105);
+    char clientBuf[32];
+    snprintf(clientBuf, sizeof(clientBuf), "Clients: %d", clients);
+    g_canvas->print(clientBuf);
+    
+    uint32_t now = millis();
+    uint32_t elapsed = now / 1000;
+    uint32_t remaining = (elapsed < 30) ? (30 - elapsed) : 0;
+    
+    g_canvas->setTextColor(0xFFFF);
+    g_canvas->setCursor(10, 125);
+    g_canvas->print("Waiting");
+    
+    static uint32_t lastDot = 0;
+    static uint8_t dotCount = 0;
+    if (now - lastDot > 400) {
+        lastDot = now;
+        dotCount = (dotCount + 1) % 4;
+    }
+    
+    g_canvas->setTextColor(0x07E0);
+    for (int i = 0; i < dotCount; i++) {
+        g_canvas->fillRect(75 + (i * 5), 126, 3, 5, 0x07E0);
+    }
+    
+    g_canvas->setTextSize(1);
+    g_canvas->setTextColor(0x8410);
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%us", remaining);
+    g_canvas->setCursor(140, 125);
+    g_canvas->print(buf);
+    
+    g_canvas->drawRect(8, 160, SCREEN_W - 16, 30, 0x07E0);
+    int barW = (int)((SCREEN_W - 20) * (30 - remaining) / 30);
+    g_canvas->fillRect(10, 162, barW, 26, 0x07E0);
+
+    g_canvas->setTextSize(1);
+    g_canvas->setTextColor(0x8410);
+    const char *skipHint = "[ BOOT ] skip";
+    int16_t hw = (int16_t)(strlen(skipHint) * 6);
+    g_canvas->setCursor((SCREEN_W - hw) / 2, 200);
+    g_canvas->print(skipHint);
+
+    g_canvas->flush();
+}
+
+void configWaitLoop() {
+    static uint32_t lastClientCheck = 0;
+    uint32_t pressesAtEntry = g_rawPresses;
+
+    while (g_cfgServer->isConfigMode() && g_cfgServer->update()) {
+        if (g_rawPresses != pressesAtEntry) {
+            Serial.println("[cfg] boot button - skipping config");
+            break;
+        }
+
+        uint32_t now = millis();
+        if (now - lastClientCheck > 1000) {
+            lastClientCheck = now;
+            g_connectedClients = WiFi.softAPgetStationNum();
+        }
+
+        drawWaitingForWiFi();
+        delay(50);
+    }
+}
+
 // --------------------- NeoPixel 
 
 static void ledUpdate() {
     bool capturing = (g_mode == DeviceMode::CAPTURING);
     bool isBLE = (g_captureMode == CaptureMode::BLE);
     uint32_t now = millis();
+
+    if (g_targetHit) {
+        static uint32_t lastFlash = 0;
+        static bool flashState = false;
+
+        if (g_specialType == SpecialHit::EVIL_BIRD) {
+            // Rapid red strobe — ominous alarm
+            if (now - lastFlash > 50) {
+                lastFlash = now;
+                flashState = !flashState;
+                neopixelWrite(LED_PIN,
+                    flashState ? 255 : 40,
+                    0,
+                    0
+                );
+            }
+        } else if (g_specialType == SpecialHit::RAYBAN) {
+            // Smooth cyan sine pulse — cool tech feel
+            float phase = (float)(now % 600) / 600.0f;
+            uint8_t b = (uint8_t)(sinf(phase * 6.2832f) * 127.0f + 128.0f);
+            neopixelWrite(LED_PIN, 0, b, b);
+        } else {
+            // Custom user target — alternating yellow/white
+            if (now - lastFlash > 150) {
+                lastFlash = now;
+                flashState = !flashState;
+                if (flashState) {
+                    neopixelWrite(LED_PIN, 255, 180, 0);
+                } else {
+                    neopixelWrite(LED_PIN, 255, 255, 200);
+                }
+            }
+        }
+
+        if (now - g_lastPktFlash > 1000) {
+            g_targetHit = false;
+            g_specialType = SpecialHit::NONE;
+        }
+        return;
+    }
 
     if (!capturing) {
         float phase = (float)(now % 2000) / 2000.0f;
@@ -870,8 +1112,8 @@ static void ledUpdate() {
             neopixelWrite(LED_PIN, 0, b, 0);
         }
     } else if (isBLE) {
-    float phase = (float)(now % 300) / 300.0f;
-    uint8_t brightness = (uint8_t)(sinf(phase * 6.2832f) * 127.0f + 128.0f);
+    float phase = (float)(now % 4000) / 4000.0f;
+    uint8_t brightness = (uint8_t)(sinf(phase * 6.2832f) * 80.0f + 90.0f);
     neopixelWrite(LED_PIN, 0, 0, brightness);
     } else {
         if (now - g_lastPktFlash < 80) {
@@ -907,7 +1149,13 @@ static void renderFrame() {
 
     g_canvas->fillScreen(RGB565_BLACK);
     drawStars(capturing);
-    drawCrab(g_crabFrame, capturing, isBLE);
+    if (g_specialType == SpecialHit::EVIL_BIRD) {
+        drawEvilBird(g_crabFrame, capturing, isBLE);
+    } else if (g_specialType == SpecialHit::RAYBAN) {
+        drawSunglasses();
+    } else {
+        drawCrab(g_crabFrame, capturing, isBLE);
+    }
 
     if (!capturing) {
         drawIdleHint(isBLE);
@@ -969,10 +1217,30 @@ void wifiSniffer(void *buf, wifi_promiscuous_pkt_type_t type) {
 
     const wifi_pkt_rx_ctrl_t &rx = ppkt->rx_ctrl;
     uint32_t payload_len = rx.sig_len;
+
     if (payload_len == 0u) return;
 
     if (payload_len > 4u) {
         payload_len -= 4u;
+    }
+
+    // Extract source MAC from frame header (offset 10 in 802.11)
+    const uint8_t *frame = ppkt->payload;
+    if (payload_len >= 16) {
+        const uint8_t *src_mac = frame + 10;
+        if (g_ouiConfig.isTarget(src_mac)) {
+            g_targetHit = true;
+            Serial.printf("[target] WiFi MAC hit: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                src_mac[0], src_mac[1], src_mac[2],
+                src_mac[3], src_mac[4], src_mac[5]);
+        }
+        SpecialHit special = checkSpecialOUI(src_mac);
+        if (special != SpecialHit::NONE) {
+            g_targetHit = true;
+            g_specialType = special;
+            Serial.printf("[special] WiFi special OUI hit: %02X:%02X:%02X\n",
+                src_mac[0], src_mac[1], src_mac[2]);
+        }
     }
 
     g_chanPkts[g_hopIndex]++;
@@ -1049,9 +1317,8 @@ static bool trackDevice(const uint8_t *bda) {
     return isnew;
 }
 
-static void bleScanResultHandler(
-    esp_ble_gap_cb_param_t::ble_scan_result_evt_param *rst
-);
+
+
 static void bleGapCallback(
     esp_gap_ble_cb_event_t event,
     esp_ble_gap_cb_param_t *param
@@ -1192,9 +1459,25 @@ static void bleScanResultHandler(
     esp_ble_gap_cb_param_t::ble_scan_result_evt_param *rst
 ) {
     if (!rst) return;
-    if (g_mode != DeviceMode::CAPTURING || g_captureMode != CaptureMode::BLE) {
+    if (g_mode != DeviceMode::CAPTURING ||
+        g_captureMode != CaptureMode::BLE) {
         return;
     }
+
+    if (g_ouiConfig.isTarget(rst->bda)) {
+        g_targetHit = true;
+        Serial.printf("[target] BLE MAC hit: %02X:%02X:%02X:%02X:%02X:%02X\n",
+            rst->bda[0], rst->bda[1], rst->bda[2],
+            rst->bda[3], rst->bda[4], rst->bda[5]);
+    }
+    SpecialHit special = checkSpecialOUI(rst->bda);
+    if (special != SpecialHit::NONE) {
+        g_targetHit = true;
+        g_specialType = special;
+        Serial.printf("[special] BLE special OUI hit: %02X:%02X:%02X\n",
+            rst->bda[0], rst->bda[1], rst->bda[2]);
+    }
+
     if (rst->search_evt != ESP_GAP_SEARCH_INQ_RES_EVT) return;
 
     uint8_t rf_channel = bleAdvChannelForEvent(rst->ble_evt_type);
@@ -1456,7 +1739,7 @@ void setup() {
 
     if (g_skipUsbDetect == USB_SKIP_MAGIC) {
         g_skipUsbDetect = 0;
-        Serial.println("[boot] USB detection skipped (boot exit)");
+        Serial.println("[boot] USB detection skipped");
     } else {
         bool hostFound = false;
         uint32_t t0 = millis();
@@ -1480,7 +1763,9 @@ void setup() {
         }
     }
 
-    Serial.println("[boot] no USB host - capture mode");
+    g_skipUsbDetect = USB_SKIP_MAGIC;
+
+    Serial.println("[boot] capture mode initializing");
 
     if (!gfx->begin()) Serial.println("[gfx] begin failed");
     lcd_reg_init();
@@ -1489,34 +1774,54 @@ void setup() {
     pinMode(GFX_BL, OUTPUT);
     digitalWrite(GFX_BL, HIGH);
 
-    gfx->setTextSize(2);
-    gfx->setTextColor(COL_IDLE);
-    gfx->setCursor(24, 148);
-    gfx->print("BOOTING...");
-
     g_canvas = new Arduino_Canvas(SCREEN_W, SCREEN_H, gfx, 0, 0, 0);
     if (!g_canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) {
-        Serial.println("[canvas] begin failed - halting");
+        Serial.println("[canvas] begin failed");
         while (true) delay(1000);
     }
-    Serial.printf("[canvas] %dx%d buffer ready\n", SCREEN_W, SCREEN_H);
 
     if (!initSD()) {
-        gfx->fillScreen(RGB565_BLACK);
-        gfx->setTextSize(2);
-        gfx->setTextColor(RGB565_RED);
-        gfx->setCursor(10, 148);
-        gfx->print("SD FAILED");
+        g_canvas->fillScreen(RGB565_BLACK);
+        g_canvas->setTextSize(2);
+        g_canvas->setTextColor(RGB565_RED);
+        g_canvas->setCursor(10, 148);
+        g_canvas->print("SD FAILED");
+        g_canvas->flush();
         while (true) delay(1000);
     }
+
+    if (!initBLE()) {
+        g_canvas->fillScreen(RGB565_BLACK);
+        g_canvas->setTextSize(2);
+        g_canvas->setTextColor(RGB565_RED);
+        g_canvas->setCursor(10, 148);
+        g_canvas->print("BLE FAILED");
+        g_canvas->flush();
+        while (true) delay(1000);
+    }
+
+    g_ouiConfig.load();
+
+    g_cfgServer = new ConfigServer(g_ouiConfig);
+    if (g_cfgServer->begin()) {
+        configWaitLoop();
+    }
+    if (g_cfgServer) {
+        delete g_cfgServer;
+        g_cfgServer = nullptr;
+    }
+    WiFi.softAPdisconnect(true);
+    WiFi.mode(WIFI_MODE_NULL);
+    delay(200);
 
     g_pktQueue = xQueueCreate(128, sizeof(PacketItem));
     if (!g_pktQueue) {
-        gfx->fillScreen(RGB565_BLACK);
-        gfx->setTextSize(2);
-        gfx->setTextColor(RGB565_RED);
-        gfx->setCursor(10, 148);
-        gfx->print("MEM FAILED");
+        g_canvas->fillScreen(RGB565_BLACK);
+        g_canvas->setTextSize(2);
+        g_canvas->setTextColor(RGB565_RED);
+        g_canvas->setCursor(10, 148);
+        g_canvas->print("MEM FAILED");
+        g_canvas->flush();
         while (true) delay(1000);
     }
 
@@ -1539,20 +1844,9 @@ void setup() {
 
     WiFi.mode(WIFI_MODE_NULL);
 
-    if (!initBLE()) {
-        gfx->fillScreen(RGB565_BLACK);
-        gfx->setTextSize(2);
-        gfx->setTextColor(RGB565_RED);
-        gfx->setCursor(10, 148);
-        gfx->print("BLE FAILED");
-        while (true) delay(1000);
-    }
-
     initStars();
 
-    Serial.println(
-        "[boot] ready - tap=toggle capture, double-tap=switch WiFi/BLE"
-    );
+    Serial.println("[boot] ready");
 }
 
 void loop() {

@@ -1,0 +1,259 @@
+//
+// BLE OUI Spoofer — ESP32-C3
+// Tests the sniffer by cycling through target OUIs in two modes.
+//
+// BOOT button  — switch between META (Ray-Ban) and FLOCK (Evil Bird) modes
+// Serial commands (115200):
+//   n / N       — skip to next OUI immediately
+//   m / M       — switch mode (same as BOOT)
+//   0 .. 8      — jump directly to that entry index
+//
+
+#include <Arduino.h>
+#include "esp_bt.h"
+#include "esp_gap_ble_api.h"
+#include "esp_bt_main.h"
+
+// ── Target OUI table ────────────────────────────────────────────────────────
+`
+struct Entry {
+    const char* label;
+    uint8_t     oui[3];
+};
+
+static const Entry FLOCK_ENTRIES[] = {
+    { "FLOCK  D4:11:D6", {0xD4, 0x11, 0xD6} },
+    { "FLOCK  00:17:3D", {0x00, 0x17, 0x3D} },
+    { "FLOCK  E0:0A:F6", {0xE0, 0x0A, 0xF6} },
+    { "FLOCK  00:25:DF", {0x00, 0x25, 0xDF} },
+    { "FLOCK  B4:1E:52", {0xB4, 0x1E, 0x52} },
+};
+static constexpr int FLOCK_COUNT = (int)(sizeof(FLOCK_ENTRIES) / sizeof(FLOCK_ENTRIES[0]));
+
+static const Entry META_ENTRIES[] = {
+    { "META   7C:2A:9E", {0x7C, 0x2A, 0x9E} },
+    { "META   CC:66:0A", {0xCC, 0x66, 0x0A} },
+    { "META   F4:03:43", {0xF4, 0x03, 0x43} },
+    { "META   5C:E9:1E", {0x5C, 0xE9, 0x1E} },
+};
+static constexpr int META_COUNT = (int)(sizeof(META_ENTRIES) / sizeof(META_ENTRIES[0]));
+
+enum class SpooferMode { META, FLOCK };
+
+// ── Config ───────────────────────────────────────────────────────────────────
+
+// How long to advertise each OUI before moving to the next (ms)
+static constexpr uint32_t DWELL_MS   = 5000;
+static constexpr int      BOOT_BTN   = 9;    // GPIO9 on ESP32-C3
+
+// ── State ────────────────────────────────────────────────────────────────────
+
+static SpooferMode g_mode          = SpooferMode::META;
+static int         g_current       = 0;
+static bool        g_bleReady      = false;
+static uint32_t    g_switchAt      = 0;
+static bool        g_pending       = false;  // waiting for set_rand_addr callback
+static bool        g_btnLastState  = HIGH;
+static uint32_t    g_btnLastMs     = 0;
+static uint32_t    g_lastStatusMs  = 0;
+static uint8_t     g_lastAddr[6]   = {};     // addr set by most recent beginEntry
+
+static esp_ble_adv_params_t adv_params = {
+    .adv_int_min       = 0x20,   // 20 ms
+    .adv_int_max       = 0x40,   // 40 ms
+    .adv_type          = ADV_TYPE_NONCONN_IND,
+    .own_addr_type     = BLE_ADDR_TYPE_RANDOM,
+    .peer_addr_type    = BLE_ADDR_TYPE_PUBLIC,
+    .channel_map       = ADV_CHNL_ALL,
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
+};
+
+// ── BLE helpers ──────────────────────────────────────────────────────────────
+
+static const Entry* currentEntries() {
+    return (g_mode == SpooferMode::META) ? META_ENTRIES : FLOCK_ENTRIES;
+}
+static int currentCount() {
+    return (g_mode == SpooferMode::META) ? META_COUNT : FLOCK_COUNT;
+}
+static const char* modeName() {
+    return (g_mode == SpooferMode::META) ? "META" : "FLOCK";
+}
+
+static void printMenu() {
+    Serial.println("\n─────────────────────────────────────────");
+    Serial.printf("  BLE OUI Spoofer  (ESP32-C3)  [%s]\n", modeName());
+    Serial.println("─────────────────────────────────────────");
+    const Entry* entries = currentEntries();
+    int count = currentCount();
+    for (int i = 0; i < count; i++) {
+        Serial.printf("  [%d] %s\n", i, entries[i].label);
+    }
+    Serial.println("─────────────────────────────────────────");
+    Serial.printf("  n = next   0-%d = jump   auto-cycle %ds\n",
+                  count - 1, DWELL_MS / 1000);
+    Serial.println("  BOOT / m = switch META <-> FLOCK");
+    Serial.println("─────────────────────────────────────────\n");
+}
+
+static void beginEntry(int idx);  // forward decl
+
+static void switchMode() {
+    g_mode    = (g_mode == SpooferMode::META) ? SpooferMode::FLOCK
+                                               : SpooferMode::META;
+    g_current = 0;
+    g_switchAt = millis() + DWELL_MS;
+    Serial.printf("[mode] switched to %s\n", modeName());
+    printMenu();
+    beginEntry(g_current);
+}
+
+static void beginEntry(int idx) {
+    esp_ble_gap_stop_advertising();
+
+    const Entry* entries = currentEntries();
+    int count = currentCount();
+    if (idx < 0 || idx >= count) idx = 0;
+
+    esp_bd_addr_t addr;
+    addr[0] = entries[idx].oui[0] | 0xC0;  // static random: bits 7:6 must be 11
+    addr[1] = entries[idx].oui[1];
+    addr[2] = entries[idx].oui[2];
+    addr[3] = 0x00;
+    addr[4] = 0x00;
+    addr[5] = (uint8_t)(idx + 1);
+    memcpy(g_lastAddr, addr, 6);
+
+    Serial.printf("\n[%s] entry %d/%d  label: %s\n",
+        modeName(), idx + 1, count, entries[idx].label);
+    Serial.printf("     OUI spoof:  %02X:%02X:%02X  (raw %02X:%02X:%02X)\n",
+        addr[0], addr[1], addr[2],
+        entries[idx].oui[0], entries[idx].oui[1], entries[idx].oui[2]);
+    Serial.printf("     Full addr:  %02X:%02X:%02X:%02X:%02X:%02X\n",
+        addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
+    Serial.printf("     Dwell: %lus\n", (unsigned long)(DWELL_MS / 1000));
+
+    g_pending = true;
+    esp_ble_gap_set_rand_addr(addr);
+    // advertising starts in the gap callback once the address is set
+}
+
+static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* p) {
+    switch (event) {
+        case ESP_GAP_BLE_SET_STATIC_RAND_ADDR_EVT:
+            g_pending = false;
+            esp_ble_gap_start_advertising(&adv_params);
+            break;
+
+        case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
+            if (p->adv_start_cmpl.status == ESP_BT_STATUS_SUCCESS) {
+                Serial.printf("    advertising... (%ds)\n", DWELL_MS / 1000);
+            } else {
+                Serial.printf("    adv start failed: %d\n",
+                              p->adv_start_cmpl.status);
+            }
+            break;
+
+        case ESP_GAP_BLE_ADV_STOP_COMPLETE_EVT:
+            break;
+
+        default:
+            break;
+    }
+}
+
+// ── Arduino entry points ─────────────────────────────────────────────────────
+
+void setup() {
+    Serial.begin(115200);
+    delay(300);
+
+    pinMode(BOOT_BTN, INPUT_PULLUP);
+
+    // C3 has no classic BT — this is expected to return ERR_INVALID_STATE
+    esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
+
+    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+    if (esp_bt_controller_init(&bt_cfg) != ESP_OK) {
+        Serial.println("[spoofer] controller_init failed");
+        return;
+    }
+    if (esp_bt_controller_enable(ESP_BT_MODE_BLE) != ESP_OK) {
+        Serial.println("[spoofer] controller_enable failed");
+        return;
+    }
+    if (esp_bluedroid_init() != ESP_OK) {
+        Serial.println("[spoofer] bluedroid_init failed");
+        return;
+    }
+    if (esp_bluedroid_enable() != ESP_OK) {
+        Serial.println("[spoofer] bluedroid_enable failed");
+        return;
+    }
+    if (esp_ble_gap_register_callback(gap_cb) != ESP_OK) {
+        Serial.println("[spoofer] register_callback failed");
+        return;
+    }
+
+    g_bleReady = true;
+    printMenu();
+
+    g_current  = 0;
+    g_switchAt = millis() + DWELL_MS;
+    beginEntry(g_current);
+}
+
+void loop() {
+    if (!g_bleReady) {
+        delay(500);
+        return;
+    }
+
+    // Handle boot button — switches META <-> FLOCK (polled, 50 ms debounce)
+    bool btnNow = digitalRead(BOOT_BTN);
+    if (btnNow == LOW && g_btnLastState == HIGH && millis() - g_btnLastMs > 50) {
+        g_btnLastMs = millis();
+        switchMode();
+    }
+    g_btnLastState = btnNow;
+
+    // Handle serial input
+    while (Serial.available()) {
+        char c = (char)Serial.read();
+
+        if (c == 'n' || c == 'N') {
+            g_current  = (g_current + 1) % currentCount();
+            g_switchAt = millis() + DWELL_MS;
+            beginEntry(g_current);
+        } else if (c == 'm' || c == 'M') {
+            switchMode();
+        } else if (c == '?') {
+            printMenu();
+        } else if (c >= '0' && c < '0' + currentCount()) {
+            g_current  = c - '0';
+            g_switchAt = millis() + DWELL_MS;
+            beginEntry(g_current);
+        }
+    }
+
+    // Periodic status — show what's live every 2 s
+    uint32_t now = millis();
+    if (!g_pending && now - g_lastStatusMs >= 2000) {
+        g_lastStatusMs = now;
+        uint32_t remaining = (g_switchAt > now) ? (g_switchAt - now) / 1000 : 0;
+        Serial.printf("[TX] [%s] %02X:%02X:%02X:%02X:%02X:%02X  next in %lus\n",
+            modeName(),
+            g_lastAddr[0], g_lastAddr[1], g_lastAddr[2],
+            g_lastAddr[3], g_lastAddr[4], g_lastAddr[5],
+            (unsigned long)remaining);
+    }
+
+    // Auto-cycle within current mode
+    if (!g_pending && millis() >= g_switchAt) {
+        g_current  = (g_current + 1) % currentCount();
+        g_switchAt = millis() + DWELL_MS;
+        beginEntry(g_current);
+    }
+
+    delay(10);
+}
