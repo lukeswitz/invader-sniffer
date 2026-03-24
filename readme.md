@@ -125,8 +125,8 @@ These are always active regardless of the SD config file.
 
 | Target | OUIs | Trigger |
 |--------|------|---------|
-| **Axis IP Camera** (Evil Bird) | `D4:11:D6`, `00:17:3D`, `E0:0A:F6`, `00:25:DF`, `B4:1E:52` | Any Axis Communications camera MAC |
-| **Meta Ray-Ban** (Ray-Ban) | `7C:2A:9E`, `CC:66:0A`, `F4:03:43`, `5C:E9:1E` | Meta Ray-Ban glasses MAC |
+| **Generic ALPR & Flock**  | `D4:11:D6`, `00:17:3D`, `E0:0A:F6`, `00:25:DF`, `B4:1E:52` | Most common camera OUIs |
+| **Meta Ray-Ban** | `7C:2A:9E`, `CC:66:0A`, `F4:03:43`, `5C:E9:1E` | Creepy glasses  |
 
 BLE random address type bits (top 2 bits of byte 0) are masked before comparing, so spoofed static-random addresses still match.
 
@@ -164,45 +164,6 @@ The NeoPixel LED (GPIO 38) indicates current state:
 ## Display
 
 The 172x320 display uses a double-buffered canvas (30 fps cap).
-
-### Main Screen Layout
-
-```
-+------------------+
-|   TITLE BAR      |  <- Mode label, separator line
-+------------------+
-|                  |
-|   STAR FIELD     |  <- 80 parallax stars (speed x2.5 when capturing)
-|                  |
-|    [MASCOT]      |  <- Animated sprite, center screen
-|                  |
-|  channel map     |  <- WiFi only: bar chart, 14 channels
-+------------------+
-|   STATUS BAR     |  <- Filename, packet count, drops, channel
-+------------------+
-```
-
-### Title Bar
-
-| State | Label | Color |
-|-------|-------|-------|
-| Idle | `INSERT TOKEN` | Mode color (green/blue) |
-| WiFi capture | `WIFI CAPTURE` | Magenta, blinks |
-| BLE capture | `BLE CAPTURE` | Magenta, blinks |
-
-### Mascot Sprite
-
-A pixel-art sprite animates at ~2.5 fps (2-frame cycle) in the center of the screen. Its appearance changes based on the last detected target:
-
-| State | Sprite | Color |
-|-------|--------|-------|
-| Normal idle (WiFi) | Crab | Green |
-| Normal idle (BLE) | Crab | Blue |
-| Normal capturing | Crab | Magenta |
-| Axis camera detected | Crow (Evil Bird) | Red |
-| Ray-Ban detected | Sunglasses | Cyan |
-
-When a packet hits the crab, it shakes briefly. Projectiles travel upward from the channel bar and disappear on impact.
 
 ### Status Bar
 
@@ -279,7 +240,7 @@ Any ESP32-C3 dev board (e.g. ESP32-C3-DevKitM-1). Uses the onboard BOOT button (
 
 ### What it does
 
-Cycles through all hardcoded target OUIs — Axis camera (FLOCK) and Meta Ray-Ban (META) — advertising each as a BLE non-connectable packet with a static-random address whose top 3 bytes match the spoofed OUI. Each OUI is advertised for 5 seconds before auto-advancing to the next.
+Cycles through all hardcoded target OUIs — FLOCK and Meta Ray-Ban (META) — advertising each as a BLE non-connectable packet with a static-random address whose top 3 bytes match the spoofed OUI. Each OUI is advertised for 5 seconds before auto-advancing to the next.
 
 ### Controls
 
