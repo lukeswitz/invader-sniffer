@@ -77,14 +77,13 @@ String g_capturePath = "";
 volatile uint32_t g_packetCount = 0;
 volatile uint32_t g_dropCount = 0;
 
-struct __attribute__((packed)) PcapGlobalHeader {
-    uint32_t magic_number = 0xa1b2c3d4;
-    uint16_t version_major = 2;
-    uint16_t version_minor = 4;
-    int32_t thiszone = 0;
-    uint32_t sigfigs = 0;
-    uint32_t snaplen = 2500;
-    uint32_t network = LINKTYPE_IEEE802_11_RADIOTAP;
+struct __attribute__((packed)) BleLlWithPhdrHeader {
+    uint8_t rf_channel;
+    int8_t signal_power;
+    int8_t noise_power;
+    uint8_t access_address_offenses;
+    uint32_t ref_access_address;
+    uint16_t flags;
 };
 
 struct __attribute__((packed)) PcapRecordHeader {
@@ -95,25 +94,18 @@ struct __attribute__((packed)) PcapRecordHeader {
 };
 
 struct __attribute__((packed)) WifiRadiotapHeader {
-    uint8_t  it_version;
-    uint8_t  it_pad;
+    uint8_t it_version;
+    uint8_t it_pad;
     uint16_t it_len;
     uint32_t it_present;
-    uint8_t  flags;
-    uint8_t  pad1;
+    uint8_t flags;
+    uint8_t rate;
     uint16_t chan_freq;
     uint16_t chan_flags;
-    int8_t   dbm_antsignal;
-    uint8_t  antenna;
-};
-
-struct __attribute__((packed)) BleLlWithPhdrHeader {
-    uint8_t rf_channel;
-    int8_t signal_power;
-    int8_t noise_power;
-    uint8_t access_address_offenses;
-    uint32_t ref_access_address;
-    uint16_t flags;
+    int8_t dbm_antsignal;
+    int8_t dbm_antnoise;
+    uint8_t antenna;
+    uint8_t pad1;
 };
 
 struct BleSeenItem {
@@ -294,6 +286,16 @@ static bool bleShouldDropDuplicate(
     slot.ts_ms = now_ms;
     return false;
 }
+
+struct __attribute__((packed)) PcapGlobalHeader {
+    uint32_t magic_number = 0xa1b2c3d4;
+    uint16_t version_major = 2;
+    uint16_t version_minor = 4;
+    int32_t thiszone = 0;
+    uint32_t sigfigs = 0;
+    uint32_t snaplen = 2500;
+    uint32_t network = LINKTYPE_IEEE802_11_RADIOTAP;
+};
 
 bool openPcap() {
     const char *prefix = (g_captureMode == CaptureMode::BLE) ? "ble" : "wifi";
@@ -868,14 +870,9 @@ static void ledUpdate() {
             neopixelWrite(LED_PIN, 0, b, 0);
         }
     } else if (isBLE) {
-        if (now - g_lastPktFlash < 120) {
-            uint8_t r = (uint8_t)(esp_random() % 256);
-            uint8_t g = (uint8_t)(esp_random() % 256);
-            uint8_t b = (uint8_t)(esp_random() % 256);
-            neopixelWrite(LED_PIN, r, g, b);
-        } else {
-            neopixelWrite(LED_PIN, 0, 0, 0);
-        }
+    float phase = (float)(now % 300) / 300.0f;
+    uint8_t brightness = (uint8_t)(sinf(phase * 6.2832f) * 127.0f + 128.0f);
+    neopixelWrite(LED_PIN, 0, 0, brightness);
     } else {
         if (now - g_lastPktFlash < 80) {
             neopixelWrite(LED_PIN, 255, 220, 120);
@@ -960,7 +957,8 @@ void packetWriterTask(void *param) {
 }
 
 void wifiSniffer(void *buf, wifi_promiscuous_pkt_type_t type) {
-    if (g_mode != DeviceMode::CAPTURING || g_captureMode != CaptureMode::WIFI) {
+    if (g_mode != DeviceMode::CAPTURING || 
+        g_captureMode != CaptureMode::WIFI) {
         return;
     }
     if (type == WIFI_PKT_MISC) return;
@@ -970,27 +968,34 @@ void wifiSniffer(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (!ppkt) return;
 
     const wifi_pkt_rx_ctrl_t &rx = ppkt->rx_ctrl;
-    uint32_t payload_len         = rx.sig_len;
+    uint32_t payload_len = rx.sig_len;
     if (payload_len == 0u) return;
+
+    if (payload_len > 4u) {
+        payload_len -= 4u;
+    }
 
     g_chanPkts[g_hopIndex]++;
     spawnProjectile(rx.channel);
 
     WifiRadiotapHeader rt{};
-    rt.it_version    = 0u;
-    rt.it_pad        = 0u;
-    rt.it_len        = sizeof(WifiRadiotapHeader);
-    rt.it_present    = 0x0000082Au;
-    rt.flags         = 0x00u;
-    rt.pad1          = 0u;
-    rt.chan_freq     = wifiChannelToFreqMHz(rx.channel);
-    rt.chan_flags    = wifiChannelFlags(rx.channel);
+    rt.it_version = 0u;
+    rt.it_pad = 0u;
+    rt.it_len = sizeof(WifiRadiotapHeader);
+    rt.it_present = 0x0000000Au;
+    rt.flags = 0u;
+    rt.rate = rx.rate & 0x1Fu;
+    rt.chan_freq = wifiChannelToFreqMHz(rx.channel);
+    rt.chan_flags = wifiChannelFlags(rx.channel);
     rt.dbm_antsignal = rx.rssi;
-    rt.antenna       = 0u;
+    rt.dbm_antnoise = -128;
+    rt.antenna = 0u;
+    rt.pad1 = 0u;
 
-    uint32_t full_orig_len = (uint32_t)sizeof(WifiRadiotapHeader) + payload_len;
-    uint32_t frame_len     = min<uint32_t>(full_orig_len, 2500u);
-    uint32_t body_len      = frame_len - sizeof(WifiRadiotapHeader);
+    uint16_t radiotap_len = sizeof(WifiRadiotapHeader);
+    uint32_t full_orig_len = radiotap_len + payload_len;
+    uint32_t frame_len = min<uint32_t>(full_orig_len, 2500u);
+    uint32_t body_len = frame_len - radiotap_len;
 
     uint8_t *pkt_data = (uint8_t *)heap_caps_malloc(
         frame_len,
@@ -1006,12 +1011,12 @@ void wifiSniffer(void *buf, wifi_promiscuous_pkt_type_t type) {
     memcpy(pkt_data + sizeof(rt), ppkt->payload, body_len);
 
     PacketItem item{};
-    item.ts_us    = (uint32_t)esp_timer_get_time();
-    item.rssi     = rx.rssi;
-    item.channel  = rx.channel;
+    item.ts_us = (uint32_t)esp_timer_get_time();
+    item.rssi = rx.rssi;
+    item.channel = rx.channel;
     item.orig_len = full_orig_len;
     item.incl_len = frame_len;
-    item.data     = pkt_data;
+    item.data = pkt_data;
 
     if (xQueueSend(g_pktQueue, &item, 0) != pdTRUE) {
         free(pkt_data);
@@ -1128,7 +1133,8 @@ static void enqueueBleAdvFrame(
     phdr.flags = blePhdrFlags(true, false, true);
 
     uint16_t ll_len = (uint16_t)(4u + 2u + 6u + payload_len + 3u);
-    uint16_t full_len = (uint16_t)(sizeof(BleLlWithPhdrHeader) + ll_len);
+    uint16_t full_len = (uint16_t)(sizeof(BleLlWithPhdrHeader) + 
+                                   ll_len);
 
     uint8_t *buf = (uint8_t *)heap_caps_malloc(
         full_len,
