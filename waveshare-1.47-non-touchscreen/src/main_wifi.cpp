@@ -17,6 +17,16 @@
 #define GFX_BL 48
 #define LED_PIN 38
 
+#define CRAB_COLS 11
+#define CRAB_ROWS 8
+#define CRAB_SCALE 4
+#define CRAB_CX (SCREEN_W / 2)
+#define CRAB_CY 115
+
+
+#define USB_SKIP_MAGIC 0xDEAD5541u
+RTC_NOINIT_ATTR static uint32_t g_skipUsbDetect;
+
 Arduino_DataBus *bus = new Arduino_ESP32SPI(
     41, 42, 40, 45
 );
@@ -59,6 +69,77 @@ static constexpr int BOOT_BTN = 0;
 
 volatile uint32_t g_rawPresses = 0;
 static uint32_t g_debounceMs = 0;
+
+// --------------------- PCAP Creation
+
+File g_pcap;
+String g_capturePath = "";
+volatile uint32_t g_packetCount = 0;
+volatile uint32_t g_dropCount = 0;
+
+struct __attribute__((packed)) PcapGlobalHeader {
+    uint32_t magic_number = 0xa1b2c3d4;
+    uint16_t version_major = 2;
+    uint16_t version_minor = 4;
+    int32_t thiszone = 0;
+    uint32_t sigfigs = 0;
+    uint32_t snaplen = 2500;
+    uint32_t network = LINKTYPE_IEEE802_11_RADIOTAP;
+};
+
+struct __attribute__((packed)) PcapRecordHeader {
+    uint32_t ts_sec;
+    uint32_t ts_usec;
+    uint32_t incl_len;
+    uint32_t orig_len;
+};
+
+struct __attribute__((packed)) WifiRadiotapHeader {
+    uint8_t  it_version;
+    uint8_t  it_pad;
+    uint16_t it_len;
+    uint32_t it_present;
+    uint8_t  flags;
+    uint8_t  pad1;
+    uint16_t chan_freq;
+    uint16_t chan_flags;
+    int8_t   dbm_antsignal;
+    uint8_t  antenna;
+};
+
+struct __attribute__((packed)) BleLlWithPhdrHeader {
+    uint8_t rf_channel;
+    int8_t signal_power;
+    int8_t noise_power;
+    uint8_t access_address_offenses;
+    uint32_t ref_access_address;
+    uint16_t flags;
+};
+
+struct BleSeenItem {
+    uint8_t bda[6];
+    uint8_t evt;
+    uint8_t len;
+    uint32_t hash;
+    uint32_t ts_ms;
+};
+
+static BleSeenItem g_bleSeen[64] = {};
+static uint8_t g_bleSeenPos = 0;
+
+struct PacketItem {
+    uint32_t ts_us;
+    uint32_t incl_len;
+    uint32_t orig_len;
+    int8_t rssi;
+    uint8_t channel;
+    uint8_t *data;
+};
+
+QueueHandle_t g_pktQueue = nullptr;
+
+
+// --------------------- HW Init
 
 void toggleCapture();
 void switchCaptureMode();
@@ -138,71 +219,7 @@ String nextCaptureName(const char *prefix) {
     return String("/") + prefix + ".pcap";
 }
 
-File g_pcap;
-String g_capturePath = "";
-volatile uint32_t g_packetCount = 0;
-volatile uint32_t g_dropCount = 0;
-
-struct __attribute__((packed)) PcapGlobalHeader {
-    uint32_t magic_number = 0xa1b2c3d4;
-    uint16_t version_major = 2;
-    uint16_t version_minor = 4;
-    int32_t thiszone = 0;
-    uint32_t sigfigs = 0;
-    uint32_t snaplen = 2500;
-    uint32_t network = LINKTYPE_IEEE802_11_RADIOTAP;
-};
-
-struct __attribute__((packed)) PcapRecordHeader {
-    uint32_t ts_sec;
-    uint32_t ts_usec;
-    uint32_t incl_len;
-    uint32_t orig_len;
-};
-
-struct __attribute__((packed)) WifiRadiotapHeader {
-    uint8_t  it_version;
-    uint8_t  it_pad;
-    uint16_t it_len;
-    uint32_t it_present;
-    uint8_t  flags;
-    uint8_t  pad1;
-    uint16_t chan_freq;
-    uint16_t chan_flags;
-    int8_t   dbm_antsignal;
-    uint8_t  antenna;
-};
-
-struct __attribute__((packed)) BleLlWithPhdrHeader {
-    uint8_t rf_channel;
-    int8_t signal_power;
-    int8_t noise_power;
-    uint8_t access_address_offenses;
-    uint32_t ref_access_address;
-    uint16_t flags;
-};
-
-struct BleSeenItem {
-    uint8_t bda[6];
-    uint8_t evt;
-    uint8_t len;
-    uint32_t hash;
-    uint32_t ts_ms;
-};
-
-static BleSeenItem g_bleSeen[64] = {};
-static uint8_t g_bleSeenPos = 0;
-
-struct PacketItem {
-    uint32_t ts_us;
-    uint32_t incl_len;
-    uint32_t orig_len;
-    int8_t rssi;
-    uint8_t channel;
-    uint8_t *data;
-};
-
-QueueHandle_t g_pktQueue = nullptr;
+// --------------------- Wireless Scans
 
 static uint32_t fnv1a32(const uint8_t *data, size_t len) {
     uint32_t h = 2166136261u;
@@ -339,14 +356,7 @@ void lcd_reg_init() {
     delay(120);
 }
 
-#define USB_SKIP_MAGIC 0xDEAD5541u
-RTC_NOINIT_ATTR static uint32_t g_skipUsbDetect;
-
-#define CRAB_COLS 11
-#define CRAB_ROWS 8
-#define CRAB_SCALE 4
-#define CRAB_CX (SCREEN_W / 2)
-#define CRAB_CY 115
+// --------------------- Graphics
 
 static const uint16_t CRAB_F0[CRAB_ROWS] = {
     0x104, 0x28A, 0x3FE, 0x6DB, 0x7FF, 0x1DC, 0x104, 0x28A,
@@ -805,20 +815,26 @@ static void updateProjectiles() {
 }
 
 static void drawProjectiles() {
-    for (int i = 0; i < g_projectileCount; i++) {
-        const Projectile &p = g_projectiles[i];
-        uint16_t col = p.color;
-        
-        if (p.y < ANIM_Y0 + 20) {
-            uint8_t alpha = (uint8_t)((p.y - ANIM_Y0) * 32);
-            uint8_t r = ((col >> 11) & 0x1F) * alpha >> 20;
-            uint8_t g = ((col >> 5) & 0x3F) * alpha >> 20;
-            uint8_t b = (col & 0x1F) * alpha >> 20;
-            col = (r << 11) | (g << 5) | b;
-        }
-        
-        g_canvas->fillRect((int16_t)p.x - 1, (int16_t)p.y - 2, 3, 4, col);
-    }
+   for (int i = 0; i < g_projectileCount; i++) {
+       const Projectile &p = g_projectiles[i];
+       
+       // Fade out
+       float fadeZone = (SCREEN_H - STATUS_H - 4 - ANIM_Y0) * 0.4f;
+       float progress = (p.y - ANIM_Y0) / fadeZone;
+       if (progress < 0) progress = 0;
+       if (progress > 1) progress = 1;
+       
+       progress = progress * progress;
+       
+       uint8_t alpha = (uint8_t)(255 * progress);
+       
+       uint16_t col = p.color;
+       uint8_t r = ((col >> 11) & 0x1F) * alpha >> 8;
+       uint8_t g = ((col >> 5) & 0x3F) * alpha >> 8;
+       uint8_t b = (col & 0x1F) * alpha >> 8;
+       uint16_t faded = (r << 11) | (g << 5) | b;
+       g_canvas->fillRect((int16_t)p.x - 1, (int16_t)p.y - 2, 3, 4, faded);
+   }
 }
 
 static void drawPacketFlash() {
@@ -835,6 +851,8 @@ static void drawPacketFlash() {
         );
     }
 }
+
+// --------------------- NeoPixel 
 
 static void ledUpdate() {
     bool capturing = (g_mode == DeviceMode::CAPTURING);
@@ -909,6 +927,8 @@ static void renderFrame() {
     g_canvas->flush();
     ledUpdate();
 }
+
+// --------------------- Packet Sniffing
 
 void ARDUINO_ISR_ATTR hopISR() {
     g_hopRequested = true;
@@ -1414,6 +1434,8 @@ void switchCaptureMode() {
         g_captureMode == CaptureMode::BLE ? "BLE" : "WIFI"
     );
 }
+
+// --------------------- Main Functions
 
 void setup() {
     Serial.begin(115200);
