@@ -93,6 +93,23 @@ The web UI lets you add and delete custom OUI targets before capture starts. Pre
 
 Files are named sequentially: `wifi_0000.pcap`, `wifi_0001.pcap`, `ble_0000.pcap`, etc. Open in Wireshark directly.
 
+
+## Review PCAPs for target OUI's using `tshark`
+
+Source: OUI Spy by @colpanichacks
+
+> [!NOTE]
+> May produce false positives, or detect other random cameras.
+
+```bash
+OUI="b4:1e:52\|00:25:df\|e0:0a:f6\|d4:11:d6\|00:17:3d\|00:0a:b1\|00:50:c2\|00:bf:15\|58:8e:81\|ec:1b:bd\|90:35:ea\|04:0d:84\|f0:82:c0\|1c:34:f1\|38:5b:44\|94:34:69\|b4:e3:f9\|70:c9:4e\|3c:91:80\|d8:f3:bc\|80:30:49\|14:5a:fc\|74:4c:a1\|08:3a:88\|9c:2f:9d\|94:08:53\|e4:aa:ea\|f4:6a:dd\|f8:a2:d6\|00:f4:8d\|d0:39:57\|e8:d0:fc"
+
+for f in *.pcap; do 
+echo "=== $f ==="
+tshark -r "$f" -T fields -e btle.advertising_address | grep -i "$OUI"
+tshark -r "$f" -T fields -e wlan.sa -e wlan.da | grep -i "$OUI"
+done
+```
 ---
 
 ## OUI Target Detection
