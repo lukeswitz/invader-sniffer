@@ -1070,28 +1070,27 @@ static void ledUpdate() {
         static bool flashState = false;
 
         if (g_specialType == SpecialHit::EVIL_BIRD) {
-            // Rapid red strobe — ominous alarm
             if (now - lastFlash > 50) {
                 lastFlash = now;
                 flashState = !flashState;
                 neopixelWrite(LED_PIN,
-                    flashState ? 255 : 40,
                     0,
+                    flashState ? 255 : 40,
                     0
                 );
             }
         } else if (g_specialType == SpecialHit::RAYBAN) {
-            // Smooth cyan sine pulse — cool tech feel
+            // Creeper glassess neopixel
             float phase = (float)(now % 600) / 600.0f;
             uint8_t b = (uint8_t)(sinf(phase * 6.2832f) * 127.0f + 128.0f);
-            neopixelWrite(LED_PIN, 0, b, b);
+            neopixelWrite(LED_PIN, b, 0, b);
         } else {
-            // Custom user target — alternating yellow/white
+            // Custom user target, 
             if (now - lastFlash > 150) {
                 lastFlash = now;
                 flashState = !flashState;
                 if (flashState) {
-                    neopixelWrite(LED_PIN, 255, 180, 0);
+                    neopixelWrite(LED_PIN, 180, 255, 0);
                 } else {
                     neopixelWrite(LED_PIN, 255, 255, 200);
                 }
@@ -1119,7 +1118,7 @@ static void ledUpdate() {
     neopixelWrite(LED_PIN, 0, 0, brightness);
     } else {
         if (now - g_lastPktFlash < 80) {
-            neopixelWrite(LED_PIN, 255, 220, 120);
+            neopixelWrite(LED_PIN, 200, 255, 0);
             return;
         }
         static uint32_t lastFlicker = 0;
