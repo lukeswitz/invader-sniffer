@@ -1038,10 +1038,12 @@ void drawWaitingForWiFi() {
 void configWaitLoop() {
     static uint32_t lastClientCheck = 0;
     uint32_t pressesAtEntry = g_rawPresses;
-
+    
     while (g_cfgServer->isConfigMode() && g_cfgServer->update()) {
         if (g_rawPresses != pressesAtEntry) {
             Serial.println("[cfg] boot button - skipping config");
+            g_seenPresses = g_rawPresses;
+            g_tapPending = false;
             break;
         }
 
