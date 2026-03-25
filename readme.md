@@ -140,7 +140,7 @@ The NeoPixel LED (GPIO 38) indicates current state:
 
 | Mode | Color | Pattern |
 |------|-------|---------|
-| WiFi idle | Green | Slow sine pulse (~2 s cycle) |
+| WiFi idle | Red | Slow sine pulse (~2 s cycle) |
 | BLE idle | Blue | Slow sine pulse (~2 s cycle) |
 
 ### Capturing
@@ -148,22 +148,20 @@ The NeoPixel LED (GPIO 38) indicates current state:
 | Mode | Color | Pattern |
 |------|-------|---------|
 | WiFi capturing | Orange/yellow | Random flicker (flame effect) |
-| WiFi packet received | Warm white | 80 ms flash |
-| BLE capturing | Blue | Fast sine pulse (~300 ms cycle) |
+| WiFi packet received | Yellow | 80 ms flash |
+| BLE capturing | Blue | Slow sine pulse (~4 s cycle) |
 
 ### Target Hit (1 second, then returns to capture color)
 
 | Target | Color | Pattern |
 |--------|-------|---------|
 | Custom OUI target | Yellow / warm white | Alternating 150 ms flash |
-| Axis camera (Evil Bird) | Red | Rapid strobe (50 ms, ominous alarm) |
+| FLOCK camera | Red | Rapid strobe (50 ms) |
 | Meta Ray-Ban | Cyan | Smooth sine pulse (600 ms cycle) |
 
 ---
 
 ## Display
-
-The 172x320 display uses a double-buffered canvas (30 fps cap).
 
 ### Status Bar
 
@@ -240,7 +238,7 @@ Any ESP32-C3 dev board (e.g. ESP32-C3-DevKitM-1). Uses the onboard BOOT button (
 
 ### What it does
 
-Cycles through all hardcoded target OUIs — FLOCK and Meta Ray-Ban (META) — advertising each as a BLE non-connectable packet with a static-random address whose top 3 bytes match the spoofed OUI. Each OUI is advertised for 5 seconds before auto-advancing to the next.
+Cycles through all hardcoded target OUIs — Axis camera (FLOCK) and Meta Ray-Ban (META) — advertising each as a BLE non-connectable packet with a static-random address whose top 3 bytes match the spoofed OUI. Each OUI is advertised for 5 seconds before auto-advancing to the next.
 
 ### Controls
 
