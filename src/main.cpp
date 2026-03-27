@@ -67,6 +67,7 @@ static constexpr uint16_t COL_DIM = 0x2945;
 static constexpr uint16_t COL_BAR_BG = 0x0841;
 static constexpr uint16_t COL_WIFI = 0xF800;
 static constexpr uint16_t COL_BLE = 0x001F;
+static constexpr uint16_t COL_DETECT = 0x801F;
 
 static inline uint16_t modeColor(bool isBLE) {
     return isBLE ? COL_BLE : COL_WIFI;
@@ -77,6 +78,7 @@ enum class DeviceMode { STOPPED, DETECTION, CAPTURING };
 
 volatile CaptureMode g_captureMode = CaptureMode::WIFI;
 volatile DeviceMode g_mode = DeviceMode::STOPPED;
+volatile bool g_detectionMode = false;
 
 static constexpr int BOOT_BTN = 0;
 
