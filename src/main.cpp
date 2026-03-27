@@ -1732,6 +1732,25 @@ void switchCaptureMode() {
     );
 }
 
+void cycleCaptureMode() {
+    if (g_mode == DeviceMode::CAPTURING) stopCapture();
+
+    if (g_mode == DeviceMode::STOPPED) {
+        g_mode = DeviceMode::DETECTION;
+        g_detectionMode = true;
+        Serial.println("[mode] -> DETECTION");
+    } else if (g_mode == DeviceMode::DETECTION) {
+        g_mode = DeviceMode::CAPTURING;
+        g_detectionMode = false;
+        startCapture();
+        Serial.println("[mode] -> CAPTURING");
+    } else if (g_mode == DeviceMode::CAPTURING) {
+        g_mode = DeviceMode::STOPPED;
+        g_detectionMode = false;
+        Serial.println("[mode] -> STOPPED");
+    }
+}
+
 // --------------------- Main Functions
 
 void setup() {
