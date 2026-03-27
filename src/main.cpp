@@ -154,6 +154,7 @@ QueueHandle_t g_pktQueue = nullptr;
 
 void toggleCapture();
 void switchCaptureMode();
+void cycleCaptureMode();
 
 void ARDUINO_ISR_ATTR bootButtonISR() {
     uint32_t now = millis();
@@ -176,8 +177,8 @@ static void handleButton() {
             g_tapTime = millis();
         } else {
             if (millis() - g_tapTime < 500) {
-                Serial.println("[btn] double-tap -> switch mode");
-                switchCaptureMode();
+                Serial.println("[btn] double-tap -> cycle mode");
+                cycleCaptureMode();
                 g_tapPending = false;
             } else {
                 toggleCapture();
