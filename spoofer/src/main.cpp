@@ -44,8 +44,8 @@ enum class SpooferMode { META, FLOCK };
 // ── Config ───────────────────────────────────────────────────────────────────
 
 // How long to advertise each OUI before moving to the next (ms)
-static constexpr uint32_t DWELL_MS   = 5000;
-static constexpr int      BOOT_BTN   = 9;    // GPIO9 on ESP32-C3
+static constexpr uint32_t DWELL_MS   = 3000;
+static constexpr int      BOOT_BTN   = 9;
 
 // ── State ────────────────────────────────────────────────────────────────────
 

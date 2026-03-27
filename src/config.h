@@ -132,6 +132,35 @@ public:
         return ok;
     }
 
+    static bool matchWildcard(const char* pat, const char* str) {
+        while (*pat && *str) {
+            if (*pat == '*') {
+                ++pat;
+                if (!*pat) return true;
+                while (*str) {
+                    if (matchWildcard(pat, str)) return true;
+                    ++str;
+                }
+                return false;
+            }
+            char p = (*pat >= 'A' && *pat <= 'Z') ? *pat + 32 : *pat;
+            char s = (*str >= 'A' && *str <= 'Z') ? *str + 32 : *str;
+            if (p != s) return false;
+            ++pat; ++str;
+        }
+        while (*pat == '*') ++pat;
+        return !*pat && !*str;
+    }
+
+    bool isNameTarget(const char* devName) const {
+        if (!devName || !devName[0]) return false;
+        for (int i = 0; i < targetCount; i++) {
+            if (!targets[i].name[0]) continue;
+            if (matchWildcard(targets[i].name, devName)) return true;
+        }
+        return false;
+    }
+
     bool isTarget(const uint8_t* bda) {
         if (!bda) return false;
         for (int i = 0; i < targetCount; i++) {

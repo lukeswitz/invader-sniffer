@@ -67,7 +67,7 @@ static constexpr uint16_t COL_DIM = 0x2945;
 static constexpr uint16_t COL_BAR_BG = 0x0841;
 static constexpr uint16_t COL_WIFI = 0xF800;
 static constexpr uint16_t COL_BLE = 0x001F;
-static constexpr uint16_t COL_DETECT = 0x801F;
+static constexpr uint16_t COL_DETECT = 0xC018;  // purple
 
 static inline uint16_t modeColor(bool isBLE) {
     return isBLE ? COL_BLE : COL_WIFI;
@@ -79,6 +79,7 @@ enum class DeviceMode { STOPPED, DETECTION, CAPTURING };
 volatile CaptureMode g_captureMode = CaptureMode::WIFI;
 volatile DeviceMode g_mode = DeviceMode::STOPPED;
 volatile bool g_detectionMode = false;
+
 
 static constexpr int BOOT_BTN = 0;
 
@@ -155,6 +156,7 @@ QueueHandle_t g_pktQueue = nullptr;
 void toggleCapture();
 void switchCaptureMode();
 void cycleCaptureMode();
+bool startCapture();
 
 void ARDUINO_ISR_ATTR bootButtonISR() {
     uint32_t now = millis();
@@ -357,9 +359,13 @@ const uint8_t g_channels[NUM_CHANNELS] = {
 };
 volatile uint8_t g_hopIndex = 0;
 volatile bool g_hopRequested = false;
+
+const uint8_t g_detectionChannels[4] = { 1, 6, 11, 37 };
+volatile uint8_t g_detectionHopIndex = 0;
 hw_timer_t *g_hopTimer = nullptr;
 
 static volatile uint32_t g_chanPkts[NUM_CHANNELS] = {};
+static volatile uint32_t g_detectionChanPkts[3] = {};  // ch 1, 6, 11
 static uint8_t g_chanDwell[NUM_CHANNELS] = {
     2, 1, 1, 1, 1, 2, 1, 1, 1, 1, 2, 1, 1, 1
 };
@@ -387,33 +393,14 @@ static const uint16_t CRAB_F1[CRAB_ROWS] = {
     0x104, 0x088, 0x3FE, 0x6DB, 0x7FF, 0x1DC, 0x202, 0x401,
 };
 
-// Evil bird (crow) on perch - frame 0: wings folded
-// col: 0  1  2  3  4  5  6  7  8  9 10
-//  0:  .  .  .  B  B  B  .  .  .  .  .  head
-//  1:  .  .  B  B  B  B  B  .  .  .  .  head wider
-//  2:  .  B  B  B  B  B  B  B  .  .  .  body + wing flat
-//  3:  .  .  B  B  B  B  B  B  B  .  .  body lower
-//  4:  .  .  .  B  B  B  B  .  .  .  .  belly
-//  5:  .  .  .  .  B  B  .  .  .  .  .  tail
-//  6:  .  .  .  .  B  .  B  .  .  .  .  feet
-//  7:  .  .  .  B  B  B  B  B  .  .  .  perch
 static const uint16_t BIRD_F0[CRAB_ROWS] = {
     0x0E0, 0x1F0, 0x3F8, 0x1FC, 0x0F0, 0x060, 0x050, 0x0F8,
 };
-// Evil bird (crow) on perch - frame 1: wings raised
-//  2:  B  B  B  B  B  B  B  B  .  .  .  wings up
-//  3:  .  .  B  B  B  B  B  B  .  .  .  body lower
+
 static const uint16_t BIRD_F1[CRAB_ROWS] = {
     0x0E0, 0x1F0, 0x7F8, 0x1F8, 0x0F0, 0x060, 0x050, 0x0F8,
 };
 
-// Sunglasses - two rectangular lens frames with nose bridge
-// col: 0  1  2  3  4  5  6  7  8  9 10
-//  1:  .  B  B  B  B  .  B  B  B  B  .  top frame
-//  2:  .  B  .  .  B  .  B  .  .  B  .  sides
-//  3:  .  B  .  .  B  B  B  .  .  B  .  bridge
-//  4:  .  B  .  .  B  .  B  .  .  B  .  sides
-//  5:  .  B  B  B  B  .  B  B  B  B  .  bottom frame
 static const uint16_t GLASSES[CRAB_ROWS] = {
     0x000, 0x3DE, 0x252, 0x272, 0x252, 0x3DE, 0x000, 0x000,
 };
@@ -584,7 +571,8 @@ static void enterMscMode() {
 
 static void drawCrab(bool frame1, bool capturing, bool isBLE) {
     const uint16_t *rows = frame1 ? CRAB_F1 : CRAB_F0;
-    const uint16_t color = capturing ? COL_CAP : modeColor(isBLE);
+    const uint16_t color = g_mode == DeviceMode::DETECTION ? COL_DETECT :
+                           (capturing ? COL_CAP : modeColor(isBLE));
 
     int16_t shake = 0;
     if (millis() < g_crabShakeTime && g_crabShakeAmount > 0) {
@@ -715,9 +703,14 @@ static void updateStars(float mult) {
 static void drawStars(bool capturing) {
     for (int i = 0; i < STAR_COUNT; i++) {
         uint8_t b = stars[i].bright;
-        uint16_t col = capturing
-            ? g_canvas->color565(b, b >> 2, b)
-            : g_canvas->color565(b, b, b);
+        uint16_t col;
+        if (g_mode == DeviceMode::DETECTION) {
+            col = g_canvas->color565(b >> 1, 0, b >> 1);  // purple tint
+        } else if (capturing) {
+            col = g_canvas->color565(b, b >> 2, b);
+        } else {
+            col = g_canvas->color565(b, b, b);
+        }
         g_canvas->drawPixel((int16_t)stars[i].x, (int16_t)stars[i].y, col);
     }
 }
@@ -725,13 +718,18 @@ static void drawStars(bool capturing) {
 static void drawTitleBar(bool capturing, bool isBLE) {
     g_canvas->fillRect(0, 0, SCREEN_W, TITLE_H, RGB565_BLACK);
 
-    uint16_t tcolor = capturing ? COL_CAP : modeColor(isBLE);
-    if (capturing && (millis() / 400) % 2) tcolor = 0xFC1F;
-
+    uint16_t tcolor;
     const char *title;
-    if (capturing) {
+
+    if (g_mode == DeviceMode::DETECTION) {
+        tcolor = COL_DETECT;
+        title = "DETECTION MODE";
+    } else if (capturing) {
+        tcolor = COL_CAP;
+        if ((millis() / 400) % 2) tcolor = 0xFC1F;
         title = isBLE ? "BLE CAPTURE" : "WIFI CAPTURE";
     } else {
+        tcolor = modeColor(isBLE);
         title = "INSERT TOKEN";
     }
 
@@ -755,7 +753,7 @@ static void drawStatusBar(bool capturing, bool isBLE) {
         0,
         ANIM_Y1,
         SCREEN_W,
-        capturing ? COL_CAP : modeColor(isBLE)
+        capturing ? COL_CAP : (g_mode == DeviceMode::DETECTION ? COL_DETECT : modeColor(isBLE))
     );
 
     g_canvas->setTextSize(1);
@@ -791,9 +789,14 @@ static void drawStatusBar(bool capturing, bool isBLE) {
         }
         g_canvas->print(buf);
     } else {
-        g_canvas->setTextColor(modeColor(isBLE));
         g_canvas->setCursor(2, ANIM_Y1 + 4);
-        g_canvas->print(isBLE ? "BLE READY" : "WIFI READY");
+        if (g_mode == DeviceMode::DETECTION) {
+            g_canvas->setTextColor(COL_DETECT);
+            g_canvas->print("DETECTION ACTIVE");
+        } else {
+            g_canvas->setTextColor(modeColor(isBLE));
+            g_canvas->print(isBLE ? "BLE READY" : "WIFI READY");
+        }
 
         if (g_capturePath.length()) {
             g_canvas->setTextColor(0x8410);
@@ -810,12 +813,55 @@ static void drawStatusBar(bool capturing, bool isBLE) {
 
 static void drawIdleHint(bool isBLE) {
     if ((millis() / 900) % 2 == 0) {
-        const char *hint = isBLE ? "START BLE PCAP" : "START WIFI PCAP";
+        const char *hint;
+        uint16_t color;
+
+        if (g_mode == DeviceMode::DETECTION) {
+            hint = "HUNTING ON WIFI+BLE";
+            color = COL_DETECT;
+        } else {
+            hint = isBLE ? "START BLE PCAP" : "START WIFI PCAP";
+            color = modeColor(isBLE);
+        }
+
         int16_t tw = (int16_t)(strlen(hint) * 6);
         g_canvas->setTextSize(1);
-        g_canvas->setTextColor(modeColor(isBLE));
+        g_canvas->setTextColor(color);
         g_canvas->setCursor((SCREEN_W - tw) / 2, CRAB_CY + 28);
         g_canvas->print(hint);
+    }
+}
+
+static void drawDetectionChannelMap() {
+    static constexpr int BAR_W    = 20;
+    static constexpr int BAR_GAP  = 10;
+    static constexpr int MAX_BAR_H = 18;
+    static constexpr int NUM_DET  = 3;
+    static constexpr int MAP_Y    = ANIM_Y1 - MAX_BAR_H - 12;
+    static const uint8_t detCh[NUM_DET] = {1, 6, 11};
+
+    int totalW = NUM_DET * (BAR_W + BAR_GAP) - BAR_GAP;
+    int startX = (SCREEN_W - totalW) / 2;
+
+    g_canvas->fillRect(startX - 2, MAP_Y - 2, totalW + 4, MAX_BAR_H + 14, RGB565_BLACK);
+
+    for (int i = 0; i < NUM_DET; i++) {
+        bool isCurrent = (i == (int)g_detectionHopIndex);
+        uint32_t pkts = g_detectionChanPkts[i];
+        int barH = max(2, (int)min(pkts * MAX_BAR_H / 16 + 2, (uint32_t)MAX_BAR_H));
+        int x = startX + i * (BAR_W + BAR_GAP);
+        int y = MAP_Y + (MAX_BAR_H - barH);
+
+        uint16_t col = isCurrent ? RGB565_WHITE : COL_DETECT;
+        g_canvas->fillRect(x, y, BAR_W, barH, col);
+
+        char label[4];
+        snprintf(label, sizeof(label), "%d", detCh[i]);
+        g_canvas->setTextSize(1);
+        g_canvas->setTextColor(isCurrent ? RGB565_WHITE : COL_DETECT);
+        int tw = (int)(strlen(label) * 6);
+        g_canvas->setCursor(x + (BAR_W - tw) / 2, MAP_Y + MAX_BAR_H + 3);
+        g_canvas->print(label);
     }
 }
 
@@ -1111,6 +1157,14 @@ static void ledUpdate() {
         return;
     }
 
+    // Detection mode: purple pulsing LED
+    if (g_mode == DeviceMode::DETECTION && g_detectionMode) {
+        float phase = (float)(now % 1000) / 1000.0f;
+        uint8_t pulse = (uint8_t)(sinf(phase * 6.2832f) * 100.0f + 128.0f);
+        neopixelWrite(LED_PIN, 0, pulse, pulse);  // Purple (G+B on this hardware = purple)
+        return;
+    }
+
     if (!capturing) {
         float phase = (float)(now % 2000) / 2000.0f;
         uint8_t b = (uint8_t)(sinf(phase * 6.2832f) * 40.0f + 50.0f);
@@ -1165,7 +1219,10 @@ static void renderFrame() {
         drawCrab(g_crabFrame, capturing, isBLE);
     }
 
-    if (!capturing) {
+    if (g_mode == DeviceMode::DETECTION) {
+        drawIdleHint(isBLE);
+        drawDetectionChannelMap();
+    } else if (!capturing) {
         drawIdleHint(isBLE);
     } else if (!isBLE) {
         drawChannelBadge();
@@ -1212,9 +1269,33 @@ void packetWriterTask(void *param) {
     }
 }
 
+// Extract SSID from 802.11 management frame (beacon/probe req/resp)
+static bool extractSSID(const uint8_t* frame, uint32_t len, char* out, uint8_t maxLen) {
+    if (len < 24) return false;
+    uint8_t fc0 = frame[0];
+    if (((fc0 >> 2) & 0x03) != 0) return false;  // management frames only
+    uint8_t subtype = (fc0 >> 4) & 0x0F;
+    // beacon=8, probe resp=5 have 12B timestamp+2B interval+2B capability before IEs
+    // probe req=4 goes straight to IEs at offset 24
+    uint32_t off = 24 + ((subtype == 8 || subtype == 5) ? 16 : 0);
+    while (off + 1 < len) {
+        uint8_t ie_type = frame[off];
+        uint8_t ie_len  = frame[off + 1];
+        if (ie_type == 0x00 && ie_len > 0) {
+            uint8_t n = ie_len < maxLen - 1 ? ie_len : maxLen - 1;
+            memcpy(out, frame + off + 2, n);
+            out[n] = 0;
+            return out[0] != 0;
+        }
+        off += 2u + ie_len;
+    }
+    return false;
+}
+
 void wifiSniffer(void *buf, wifi_promiscuous_pkt_type_t type) {
-    if (g_mode != DeviceMode::CAPTURING || 
-        g_captureMode != CaptureMode::WIFI) {
+    // Allow WiFi sniffer to run in both CAPTURING and DETECTION modes
+    if ((g_mode != DeviceMode::CAPTURING && g_mode != DeviceMode::DETECTION) ||
+        (g_mode == DeviceMode::CAPTURING && g_captureMode != CaptureMode::WIFI)) {
         return;
     }
     if (type == WIFI_PKT_MISC) return;
@@ -1249,9 +1330,32 @@ void wifiSniffer(void *buf, wifi_promiscuous_pkt_type_t type) {
             Serial.printf("[special] WiFi special OUI hit: %02X:%02X:%02X\n",
                 src_mac[0], src_mac[1], src_mac[2]);
         }
+
+        // Check SSID against target name patterns
+        if (!g_targetHit) {
+            char ssid[33] = {0};
+            if (extractSSID(frame, payload_len, ssid, sizeof(ssid)) &&
+                g_ouiConfig.isNameTarget(ssid)) {
+                g_targetHit = true;
+                Serial.printf("[target] WiFi SSID match: %s\n", ssid);
+            }
+        }
+
+        // Auto-capture trigger in detection mode
+        if (g_detectionMode && g_targetHit) {
+            g_detectionMode = false;
+            g_mode = DeviceMode::CAPTURING;
+            g_captureMode = CaptureMode::WIFI;
+            startCapture();
+            Serial.println("[detect] WiFi target found! Starting WiFi capture...");
+        }
     }
 
-    g_chanPkts[g_hopIndex]++;
+    if (g_mode == DeviceMode::DETECTION) {
+        g_detectionChanPkts[g_detectionHopIndex]++;
+    } else {
+        g_chanPkts[g_hopIndex]++;
+    }
     spawnProjectile(rx.channel);
 
     WifiRadiotapHeader rt{};
@@ -1467,13 +1571,11 @@ static void bleScanResultHandler(
     esp_ble_gap_cb_param_t::ble_scan_result_evt_param *rst
 ) {
     if (!rst) return;
-    if (g_mode != DeviceMode::CAPTURING ||
-        g_captureMode != CaptureMode::BLE) {
-        return;
-    }
 
+    bool targetFound = false;
     if (g_ouiConfig.isTarget(rst->bda)) {
         g_targetHit = true;
+        targetFound = true;
         Serial.printf("[target] BLE MAC hit: %02X:%02X:%02X:%02X:%02X:%02X\n",
             rst->bda[0], rst->bda[1], rst->bda[2],
             rst->bda[3], rst->bda[4], rst->bda[5]);
@@ -1482,13 +1584,60 @@ static void bleScanResultHandler(
     if (special != SpecialHit::NONE) {
         g_targetHit = true;
         g_specialType = special;
+        targetFound = true;
         Serial.printf("[special] BLE special OUI hit: %02X:%02X:%02X\n",
             rst->bda[0], rst->bda[1], rst->bda[2]);
+    }
+
+    // Check BLE advertisement name against target name patterns
+    if (!targetFound && rst->ble_adv && rst->adv_data_len > 0) {
+        char bleName[33] = {0};
+        const uint8_t* adv = rst->ble_adv;
+        uint8_t advLen = rst->adv_data_len;
+        for (uint8_t pos = 0; pos + 1 < advLen; ) {
+            uint8_t adLen = adv[pos];
+            if (adLen == 0) break;
+            uint8_t adType = adv[pos + 1];
+            if ((adType == 0x09 || adType == 0x08) && adLen > 1) {
+                uint8_t nameLen = adLen - 1;
+                if (nameLen >= sizeof(bleName)) nameLen = sizeof(bleName) - 1;
+                memcpy(bleName, adv + pos + 2, nameLen);
+                bleName[nameLen] = 0;
+                break;
+            }
+            pos += adLen + 1;
+        }
+        if (bleName[0] && g_ouiConfig.isNameTarget(bleName)) {
+            g_targetHit = true;
+            targetFound = true;
+            Serial.printf("[target] BLE name match: %s\n", bleName);
+        }
+    }
+
+    // Auto-capture trigger in detection mode
+    if (g_detectionMode && targetFound) {
+        g_detectionMode = false;
+        g_mode = DeviceMode::CAPTURING;
+        g_captureMode = CaptureMode::BLE;
+        startCapture();
+        Serial.println("[detect] BLE target found! Starting BLE capture...");
     }
 
     if (rst->search_evt != ESP_GAP_SEARCH_INQ_RES_EVT) return;
 
     uint8_t rf_channel = bleAdvChannelForEvent(rst->ble_evt_type);
+
+    // Spawn projectile in detection mode too (not just capture)
+    if (g_mode == DeviceMode::DETECTION &&
+        rst->ble_evt_type != ESP_BLE_EVT_SCAN_RSP) {
+        spawnProjectile(rf_channel);
+    }
+
+    if (g_mode != DeviceMode::CAPTURING ||
+        g_captureMode != CaptureMode::BLE) {
+        return;
+    }
+
     uint32_t now_ms = millis();
 
     if (rst->ble_evt_type == ESP_BLE_EVT_SCAN_RSP) {
@@ -1595,8 +1744,8 @@ static void bleGapCallback(
     switch (event) {
         case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT:
             if (
-                g_mode == DeviceMode::CAPTURING &&
-                g_captureMode == CaptureMode::BLE
+                (g_mode == DeviceMode::CAPTURING && g_captureMode == CaptureMode::BLE) ||
+                g_mode == DeviceMode::DETECTION
             ) {
                 esp_err_t e = esp_ble_gap_start_scanning(0);
                 Serial.printf("[ble] start_scanning -> %d\n", e);
@@ -1733,25 +1882,33 @@ void switchCaptureMode() {
 }
 
 void cycleCaptureMode() {
-    if (g_mode == DeviceMode::CAPTURING) stopCapture();
+    // Cycle: WIFI idle -> BLE idle -> DETECTION -> WIFI idle -> ...
+    if (g_mode == DeviceMode::CAPTURING) return;  // no cycling while capturing
 
-    if (g_mode == DeviceMode::STOPPED) {
-        g_mode = DeviceMode::DETECTION;
-        g_detectionMode = true;
-        Serial.println("[mode] -> DETECTION");
-    } else if (g_mode == DeviceMode::DETECTION) {
-        g_mode = DeviceMode::CAPTURING;
-        g_detectionMode = false;
-        startCapture();
-        Serial.println("[mode] -> CAPTURING");
-    } else if (g_mode == DeviceMode::CAPTURING) {
+    if (g_mode == DeviceMode::DETECTION) {
+        // DETECTION -> WIFI idle
         g_mode = DeviceMode::STOPPED;
         g_detectionMode = false;
-        Serial.println("[mode] -> STOPPED");
+        g_captureMode = CaptureMode::WIFI;
+        timerStop(g_hopTimer);
+        esp_wifi_set_promiscuous(false);
+        esp_wifi_set_promiscuous_rx_cb(nullptr);
+        esp_ble_gap_stop_scanning();
+        Serial.println("[mode] DETECTION -> WIFI");
+    } else if (g_captureMode == CaptureMode::BLE) {
+        // BLE idle -> DETECTION
+        g_mode = DeviceMode::DETECTION;
+        g_detectionMode = true;
+        g_captureMode = CaptureMode::WIFI;  // prevent single-tap from starting BLE pcap
+        Serial.println("[mode] BLE -> DETECTION");
+    } else {
+        // WIFI idle -> BLE idle
+        g_captureMode = CaptureMode::BLE;
+        Serial.println("[mode] WIFI -> BLE");
     }
 }
 
-// --------------------- Main Functions
+// --------------------- Main --------------------- 
 
 void setup() {
     Serial.begin(115200);
@@ -1888,8 +2045,50 @@ void loop() {
 
     handleButton();
 
+    // Initialize WiFi promiscuous mode for DETECTION on first entry
+    static bool detectionInitDone = false;
+    if (g_mode == DeviceMode::DETECTION && !detectionInitDone) {
+        detectionInitDone = true;
+
+        // WiFi promiscuous on channels 1/6/11
+        WiFi.disconnect(true, true);
+        WiFi.mode(WIFI_MODE_STA);
+        delay(100);
+        esp_wifi_set_promiscuous(false);
+        esp_wifi_set_promiscuous_rx_cb(nullptr);
+        delay(20);
+        g_detectionHopIndex = 0;
+        esp_wifi_set_channel(g_detectionChannels[0], WIFI_SECOND_CHAN_NONE);
+        wifi_promiscuous_filter_t filt{};
+        filt.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT |
+                          WIFI_PROMIS_FILTER_MASK_CTRL |
+                          WIFI_PROMIS_FILTER_MASK_DATA;
+        esp_wifi_set_promiscuous_filter(&filt);
+        esp_wifi_set_promiscuous(true);
+        esp_wifi_set_promiscuous_rx_cb(&wifiSniffer);
+        timerStart(g_hopTimer);
+
+        // BLE scanning simultaneously — scan_window < scan_interval
+        // lets ESP32 coexistence arbiter share the radio with WiFi
+        if (g_bleReady) {
+            static const esp_ble_scan_params_t det_scan_params = {
+                .scan_type          = BLE_SCAN_TYPE_PASSIVE,
+                .own_addr_type      = BLE_ADDR_TYPE_PUBLIC,
+                .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
+                .scan_interval      = 0x0100,  // 160ms (max for coexist)
+                .scan_window        = 0x0050,  // 50ms (~31% BLE, ~69% WiFi)
+                .scan_duplicate     = BLE_SCAN_DUPLICATE_DISABLE,
+            };
+            esp_ble_gap_set_scan_params((esp_ble_scan_params_t *)&det_scan_params);
+        }
+        Serial.println("[detect] WiFi+BLE scanning started");
+    }
+    if (g_mode != DeviceMode::DETECTION) {
+        detectionInitDone = false;
+    }
+
     if (
-        g_mode == DeviceMode::CAPTURING &&
+        (g_mode == DeviceMode::CAPTURING || g_mode == DeviceMode::DETECTION) &&
         g_captureMode == CaptureMode::WIFI &&
         g_hopRequested
     ) {
@@ -1898,25 +2097,39 @@ void loop() {
         if (g_dwellLeft > 1) {
             g_dwellLeft--;
         } else {
-            uint8_t idx = g_hopIndex;
-            uint32_t pkts = g_chanPkts[idx];
-            bool isPrimary = (
-                g_channels[idx] == 1 ||
-                g_channels[idx] == 6 ||
-                g_channels[idx] == 11
-            );
-            uint8_t base = isPrimary ? 2 : 1;
-            uint8_t bonus =
-                (uint8_t)min((pkts + 2) / 3, (uint32_t)6);
-            g_chanDwell[idx] = base + bonus;
-            g_chanPkts[idx] = pkts >> 1;
+            if (g_detectionMode) {
+                // Detection mode: use only {1, 6, 11} for WiFi
+                g_detectionChanPkts[g_detectionHopIndex] >>= 1;  // decay
+                g_detectionHopIndex = (g_detectionHopIndex + 1) % 3;
+                esp_wifi_set_channel(
+                    g_detectionChannels[g_detectionHopIndex],
+                    WIFI_SECOND_CHAN_NONE
+                );
+                g_dwellLeft = 2;  // Shorter dwell in detection mode
+                Serial.printf("[detect] hop to CH:%u\n",
+                    g_detectionChannels[g_detectionHopIndex]);
+            } else {
+                // Normal mode: use all 14 channels
+                uint8_t idx = g_hopIndex;
+                uint32_t pkts = g_chanPkts[idx];
+                bool isPrimary = (
+                    g_channels[idx] == 1 ||
+                    g_channels[idx] == 6 ||
+                    g_channels[idx] == 11
+                );
+                uint8_t base = isPrimary ? 2 : 1;
+                uint8_t bonus =
+                    (uint8_t)min((pkts + 2) / 3, (uint32_t)6);
+                g_chanDwell[idx] = base + bonus;
+                g_chanPkts[idx] = pkts >> 1;
 
-            g_hopIndex = (g_hopIndex + 1) % NUM_CHANNELS;
-            g_dwellLeft = g_chanDwell[g_hopIndex];
-            esp_wifi_set_channel(
-                g_channels[g_hopIndex],
-                WIFI_SECOND_CHAN_NONE
-            );
+                g_hopIndex = (g_hopIndex + 1) % NUM_CHANNELS;
+                g_dwellLeft = g_chanDwell[g_hopIndex];
+                esp_wifi_set_channel(
+                    g_channels[g_hopIndex],
+                    WIFI_SECOND_CHAN_NONE
+                );
+            }
         }
     }
 
