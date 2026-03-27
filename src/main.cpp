@@ -73,7 +73,7 @@ static inline uint16_t modeColor(bool isBLE) {
 }
 
 enum class CaptureMode { WIFI, BLE };
-enum class DeviceMode { STOPPED, CAPTURING };
+enum class DeviceMode { STOPPED, DETECTION, CAPTURING };
 
 volatile CaptureMode g_captureMode = CaptureMode::WIFI;
 volatile DeviceMode g_mode = DeviceMode::STOPPED;
