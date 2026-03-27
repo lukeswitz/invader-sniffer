@@ -16,7 +16,7 @@
 #include "esp_bt_main.h"
 
 // ── Target OUI table ────────────────────────────────────────────────────────
-`
+
 struct Entry {
     const char* label;
     uint8_t     oui[3];
@@ -169,18 +169,27 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* p) {
 
 void setup() {
     Serial.begin(115200);
-    delay(300);
+    
+    Serial.println("\n[boot] starting...");
+    Serial.flush();
 
     pinMode(BOOT_BTN, INPUT_PULLUP);
 
-    // C3 has no classic BT — this is expected to return ERR_INVALID_STATE
     esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     if (esp_bt_controller_init(&bt_cfg) != ESP_OK) {
-        Serial.println("[spoofer] controller_init failed");
+        Serial.println("[ERROR] controller_init failed");
         return;
     }
+
+    if (esp_bt_controller_init(&bt_cfg) != ESP_OK) {
+        Serial.println("[ERROR] controller_init failed");
+        return;
+    }
+    Serial.println("[boot] controller init ok");
+    Serial.flush();
+
     if (esp_bt_controller_enable(ESP_BT_MODE_BLE) != ESP_OK) {
         Serial.println("[spoofer] controller_enable failed");
         return;
@@ -203,7 +212,7 @@ void setup() {
 
     g_current  = 0;
     g_switchAt = millis() + DWELL_MS;
-    g_flockAt  = millis() + 10000;  // auto-switch to FLOCK after 10 s
+    g_flockAt  = millis() + 10000;
     beginEntry(g_current);
 }
 

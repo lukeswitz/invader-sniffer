@@ -1,5 +1,7 @@
 # Waveshare 1.47" ESP32-S3 Hybrid Sniffer
 
+> **Forked from [nitekry/invader-sniffer](https://github.com/nitekry/invader-sniffer)** — ported and extended for the [Waveshare ESP32-S3 1.47" display board](https://www.waveshare.com/esp32-s3-lcd-1.47.htm). Credit and thanks to the original author for the core sniffer concept and pixel-art mascot.
+
 A dual-mode WiFi and BLE packet sniffer that captures to PCAP files on an SD card. Built for the Waveshare ESP32-S3 1.47" display board. Features OUI-based target detection with visual and LED alerts, a config web UI, and USB mass storage mode for easy file retrieval.
 
 ---
@@ -93,23 +95,6 @@ The web UI lets you add and delete custom OUI targets before capture starts. Pre
 
 Files are named sequentially: `wifi_0000.pcap`, `wifi_0001.pcap`, `ble_0000.pcap`, etc. Open in Wireshark directly.
 
-
-## Review PCAPs for target OUI's using `tshark`
-
-Source: OUI Spy by @colpanichacks
-
-> [!NOTE]
-> May produce false positives, or detect other random cameras.
-
-```bash
-OUI="b4:1e:52\|00:25:df\|e0:0a:f6\|d4:11:d6\|00:17:3d\|00:0a:b1\|00:50:c2\|00:bf:15\|58:8e:81\|ec:1b:bd\|90:35:ea\|04:0d:84\|f0:82:c0\|1c:34:f1\|38:5b:44\|94:34:69\|b4:e3:f9\|70:c9:4e\|3c:91:80\|d8:f3:bc\|80:30:49\|14:5a:fc\|74:4c:a1\|08:3a:88\|9c:2f:9d\|94:08:53\|e4:aa:ea\|f4:6a:dd\|f8:a2:d6\|00:f4:8d\|d0:39:57\|e8:d0:fc"
-
-for f in *.pcap; do 
-echo "=== $f ==="
-tshark -r "$f" -T fields -e btle.advertising_address | grep -i "$OUI"
-tshark -r "$f" -T fields -e wlan.sa -e wlan.da | grep -i "$OUI"
-done
-```
 ---
 
 ## OUI Target Detection
@@ -142,8 +127,8 @@ These are always active regardless of the SD config file.
 
 | Target | OUIs | Trigger |
 |--------|------|---------|
-| **Generic ALPR & Flock**  | `D4:11:D6`, `00:17:3D`, `E0:0A:F6`, `00:25:DF`, `B4:1E:52` | Most common camera OUIs |
-| **Meta Ray-Ban** | `7C:2A:9E`, `CC:66:0A`, `F4:03:43`, `5C:E9:1E` | Creepy glasses  |
+| **Axis IP Camera** (Evil Bird) | `D4:11:D6`, `00:17:3D`, `E0:0A:F6`, `00:25:DF`, `B4:1E:52` | Any Axis Communications camera MAC |
+| **Meta Ray-Ban** (Ray-Ban) | `7C:2A:9E`, `CC:66:0A`, `F4:03:43`, `5C:E9:1E` | Meta Ray-Ban glasses MAC |
 
 BLE random address type bits (top 2 bits of byte 0) are masked before comparing, so spoofed static-random addresses still match.
 

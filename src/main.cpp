@@ -21,7 +21,11 @@ static ConfigServer* g_cfgServer = nullptr;
 static volatile bool g_targetHit = false;
 static volatile SpecialHit g_specialType = SpecialHit::NONE;
 
-#define GFX_BL 48
+#ifdef BOARD_1_47B
+#define GFX_BL 46   // ESP32-S3-LCD-1.47B (USB-C)
+#else
+#define GFX_BL 48   // ESP32-S3-LCD-1.47  (USB-A)
+#endif
 #define LED_PIN 38
 
 #define CRAB_COLS 11
