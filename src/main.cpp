@@ -832,36 +832,34 @@ static void drawIdleHint(bool isBLE) {
     }
 }
 
-static void drawDetectionChannelMap() {
-    static constexpr int BAR_W    = 20;
-    static constexpr int BAR_GAP  = 10;
-    static constexpr int MAX_BAR_H = 18;
-    static constexpr int NUM_DET  = 3;
-    static constexpr int MAP_Y    = ANIM_Y1 - MAX_BAR_H - 12;
-    static const uint8_t detCh[NUM_DET] = {1, 6, 11};
 
-    int totalW = NUM_DET * (BAR_W + BAR_GAP) - BAR_GAP;
+static void drawDetectionChannelMap() {
+    static constexpr int BAR_W   = 10;
+    static constexpr int BAR_GAP = 2;
+    static constexpr int MAX_BAR_H = 18;
+    static constexpr int MAP_Y   = ANIM_Y1 - MAX_BAR_H - 4;
+
+    // Same grid as drawChannelMap so bars sit under projectile spawn points
+    int totalW = NUM_CHANNELS * (BAR_W + BAR_GAP) - BAR_GAP;
     int startX = (SCREEN_W - totalW) / 2;
 
-    g_canvas->fillRect(startX - 2, MAP_Y - 2, totalW + 4, MAX_BAR_H + 14, RGB565_BLACK);
+    g_canvas->fillRect(startX, MAP_Y, totalW, MAX_BAR_H + 1, RGB565_BLACK);
 
-    for (int i = 0; i < NUM_DET; i++) {
-        bool isCurrent = (i == (int)g_detectionHopIndex);
-        uint32_t pkts = g_detectionChanPkts[i];
-        int barH = max(2, (int)min(pkts * MAX_BAR_H / 16 + 2, (uint32_t)MAX_BAR_H));
+    // ch1=idx0, ch6=idx5, ch11=idx10
+    static const int detIdx[3] = {0, 5, 10};
+
+    for (int d = 0; d < 3; d++) {
+        int i = detIdx[d];
+        bool isCurrent = (d == (int)g_detectionHopIndex);
+        uint32_t pkts = g_detectionChanPkts[d];
+        uint8_t dwell = pkts > 8 ? 8 : (uint8_t)pkts;
+
+        int barH = max(2, (int)dwell * MAX_BAR_H / 8);
         int x = startX + i * (BAR_W + BAR_GAP);
         int y = MAP_Y + (MAX_BAR_H - barH);
 
-        uint16_t col = isCurrent ? RGB565_WHITE : COL_DETECT;
+        uint16_t col = isCurrent ? RGB565_WHITE : (dwell > 2 ? COL_DETECT : COL_DIM);
         g_canvas->fillRect(x, y, BAR_W, barH, col);
-
-        char label[4];
-        snprintf(label, sizeof(label), "%d", detCh[i]);
-        g_canvas->setTextSize(1);
-        g_canvas->setTextColor(isCurrent ? RGB565_WHITE : COL_DETECT);
-        int tw = (int)(strlen(label) * 6);
-        g_canvas->setCursor(x + (BAR_W - tw) / 2, MAP_Y + MAX_BAR_H + 3);
-        g_canvas->print(label);
     }
 }
 
