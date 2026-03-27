@@ -2,7 +2,9 @@
 
 > **Forked from [nitekry/invader-sniffer](https://github.com/nitekry/invader-sniffer)** — ported and extended for the [Waveshare ESP32-S3 1.47" display board](https://www.waveshare.com/esp32-s3-lcd-1.47.htm). Credit and thanks to the original author for the core sniffer concept and pixel-art mascot.
 
-A dual-mode WiFi and BLE packet sniffer that captures to PCAP files on an SD card. Built for the Waveshare ESP32-S3 1.47" display board. Features OUI-based target detection with visual and LED alerts, a config web UI, and USB mass storage mode for easy file retrieval.
+A dual-mode WiFi and BLE packet sniffer that captures to PCAP files on an SD card. WebUI configurable targets (OUI and named targets) Meta RayBan and Flock auto alerts. 
+
+Built for the Waveshare ESP32-S3 1.47" display board. Features OUI-based target detection with visual and LED alerts, a config web UI, and USB mass storage mode for easy file retrieval.
 
 ---
 
