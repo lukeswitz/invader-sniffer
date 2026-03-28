@@ -8,14 +8,18 @@ Built for the Waveshare ESP32-S3 1.47" display board (two variants: standard and
 
 ---
 
+## Legal Disclaimer
+
 > [!IMPORTANT]
-> Legal Disclaimer
 > **This tool is provided for authorized security research, network diagnostics, and educational purposes only.**
 >
-> Capturing wireless packets may be illegal without explicit authorization from the network owner and all parties whose data may be captured. Before using this device, you are solely responsible for: Obtaining written permission from the owner of any network or device you monitor.
->
-> Complying with all applicable laws in your jurisdiction, including but not limited to the Electronic Communications Privacy Act (ECPA), the Computer Fraud and Abuse Act (CFAA), the GDPR, and equivalent national and regional statutes.
-> **The authors accept no liability for misuse.**
+> Capturing wireless packets and spoofing MAC/BLE addresses may be illegal without explicit authorization from the network owner and all parties whose data may be captured. Before using this device, you are solely responsible for:
+> - Obtaining written permission from the owner of any network or device you monitor.
+> - Complying with all applicable laws in your jurisdiction, including but not limited to the Electronic Communications Privacy Act (ECPA), the Computer Fraud and Abuse Act (CFAA), the General Data Protection Regulation (GDPR), and equivalent national and regional statutes.
+> - Ensuring that use of the BLE spoofer companion does not violate radio spectrum regulations (FCC Part 15, CE RED, or local equivalents) in your country.
+> - Passive promiscuous WiFi capture of 802.11 management and data frames, and BLE advertisement scanning, may expose personally identifiable information (MAC addresses, device names, payload data). Handle all captured data responsibly.
+> 
+> **The authors accept no liability for misuse. Use of this software in violation of any law is strictly prohibited and entirely your own responsibility.**
 
 ---
 
@@ -129,7 +133,7 @@ Always active regardless of SD config (mod in source)
 | Target | OUIs | LED Alert |
 |--------|------|-----------|
 | **Axis IP Camera** (FLOCK) | `D4:11:D6`, `00:17:3D`, `E0:0A:F6`, `00:25:DF`, `B4:1E:52` | Green rapid strobe |
-| **Meta Ray-Ban** | `7C:2A:9E`, `CC:66:0A`, `F4:03:43`, `5C:E9:1E` | Purple sine pulse |
+| **Meta Ray-Ban** | `7C:2A:9E`, `CC:66:0A`, `F4:03:43`, `5C:E9:1E` | Cyan sine pulse |
 
 BLE random address type bits (top 2 bits of byte 0) are masked before OUI comparison.
 
@@ -166,9 +170,8 @@ Idle: mode label (`WIFI READY` / `BLE READY` / `DETECTION ACTIVE`).
 
 ### Channel Activity Map
 
-**WiFi capture**: 14 bars for channels 1–14. Height = dwell weight. Current channel = white, high traffic = magenta, primary (1/6/11) = green, other = dim.
+**WiFi capture**: 14 bars for channels 1–14. Height = dwell weight. Current channel = white, high traffic = magenta, primary (1/6/11) = green, other = red.
 
-**Detection mode**: 3 bars for channels 1, 6, 11 (purple theme). Height = packet rate. Current channel = white.
 
 ---
 
