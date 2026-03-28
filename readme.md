@@ -23,21 +23,6 @@ Capturing wireless packets may be illegal without explicit authorization from th
 
 ---
 
-## Hardware
-
-| Component | Detail |
-|-----------|--------|
-| MCU | ESP32-S3 (240 MHz, 16 MB flash, PSRAM) |
-| Display | Waveshare 1.47" ST7789, 172x320, SPI |
-| Storage | SD card via SD_MMC 4-bit |
-| LED | NeoPixel on GPIO 38 |
-| Button | BOOT button on GPIO 0 |
-| USB | Native USB (CDC + MSC) |
-
-Two build targets: `wave_sniff_s3` (standard) and `wave_sniff_s3_b` (USB-C 1.47B variant, `-DBOARD_1_47B`).
-
----
-
 ## Features
 
 - **WiFi promiscuous capture** — all 802.11 frames on channels 1–14, saved as radiotap PCAP
@@ -145,7 +130,7 @@ A name-only target (no OUIs) matches purely by name pattern.
 
 ### Hardcoded Special Targets
 
-Always active regardless of SD config.
+Always active regardless of SD config (mod in source)
 
 | Target | OUIs | LED Alert |
 |--------|------|-----------|
@@ -158,23 +143,6 @@ BLE random address type bits (top 2 bits of byte 0) are masked before OUI compar
 
 Connect to `SNIFF-CONFIG`, navigate to `http://192.168.4.1`. Enter a name (supports `*` wildcard) and up to 5 OUIs in `AA:BB:CC` format. OUIs are optional — name-only targets match by device name/SSID wildcard.
 
-### OUI JSON Format
-
-```json
-{
-  "targets": [
-    {
-      "name": "Camera*",
-      "ouis": []
-    },
-    {
-      "name": "My Router",
-      "ouis": [[170, 187, 204]]
-    }
-  ]
-}
-```
-
 ---
 
 ## LED Colors
@@ -184,12 +152,12 @@ Connect to `SNIFF-CONFIG`, navigate to `http://192.168.4.1`. Enter a name (suppo
 | WiFi idle | Red | Slow sine pulse |
 | BLE idle | Blue | Slow sine pulse |
 | Detection mode | Purple | Slow sine pulse |
-| WiFi capturing | Orange/yellow | Random flicker |
+| WiFi capturing | Green | Random flicker |
 | WiFi packet flash | Yellow | 80 ms flash |
 | BLE capturing | Blue | Slow sine pulse |
 | Custom target hit | Yellow/warm white | 150 ms alternating flash |
-| FLOCK (Axis) hit | Green | 50 ms rapid strobe |
-| Meta Ray-Ban hit | Purple | 600 ms sine pulse |
+| FLOCK (Axis) hit | Red | 50 ms rapid strobe |
+| Meta Ray-Ban hit | Cyan | 600 ms sine pulse |
 
 ---
 
@@ -217,7 +185,7 @@ Idle: mode label (`WIFI READY` / `BLE READY` / `DETECTION ACTIVE`).
 | Press | Action |
 |-------|--------|
 | Single tap | Toggle capture on/off |
-| Double tap (within 500 ms) | Cycle mode: WiFi idle -> BLE idle -> Detection -> WiFi idle |
+| Double tap (within 500 ms) | Cycle mode: WiFi idle -> BLE idle -> Detection ->  |
 | Hold during MSC mode | Restart into capture mode |
 | Press during config countdown | Skip config, enter capture immediately |
 
