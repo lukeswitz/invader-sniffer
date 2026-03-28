@@ -1,0 +1,13 @@
+{
+  "name": "Invader Sniffer (USB-C 1.47B)",
+  "version": "1.0.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        { "path": "firmware/wave_sniff_s3_b.bin", "offset": 0 }
+      ]
+    }
+  ]
+}

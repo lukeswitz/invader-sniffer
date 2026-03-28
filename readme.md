@@ -1,5 +1,7 @@
 # Waveshare 1.47" ESP32-S3 Hybrid Sniffer
 
+![Build](https://github.com/lukeswitz/invader-sniffer/actions/workflows/build.yml/badge.svg)
+
 > **Forked from [nitekry/invader-sniffer](https://github.com/nitekry/invader-sniffer)** — ported and extended for the [Waveshare ESP32-S3 1.47" display board](https://www.waveshare.com/esp32-s3-lcd-1.47.htm). Credit and thanks to the original author for the core sniffer concept and pixel-art mascot.
 
 A dual-mode WiFi and BLE packet sniffer that captures to PCAP files on an SD card. Supports OUI and name-based target detection with auto-capture, a detection sweep mode, Meta Ray-Ban and Flock (Axis) auto-alerts, and a config web UI.
@@ -248,6 +250,28 @@ Dependencies (managed by PlatformIO):
 - `bblanchon/ArduinoJson @ ^7.0.0`
 - `ESP32Async/AsyncTCP @ ^3.3.3`
 - `ESP32Async/ESPAsyncWebServer @ ^3.6.0`
+
+---
+
+## Flashing
+
+### Web Flasher (browser, no tools required)
+
+Chrome or Edge with WebSerial. Hold BOOT while plugging in USB:
+
+**[https://lukeswitz.github.io/invader-sniffer](https://lukeswitz.github.io/invader-sniffer)**
+
+### CLI One-Liner (macOS / Linux)
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/lukeswitz/invader-sniffer/main/flash.sh)
+```
+
+Auto-detects the serial port and prompts for board variant. Override port with `PORT=/dev/ttyXXX`.
+
+### CI
+
+GitHub Actions builds both environments on every push to `main` and deploys merged binaries to GitHub Pages. Artifacts are also downloadable from the Actions tab.
 
 ---
 

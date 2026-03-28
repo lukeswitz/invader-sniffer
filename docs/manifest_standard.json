@@ -1,0 +1,13 @@
+{
+  "name": "Invader Sniffer (Standard)",
+  "version": "1.0.0",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        { "path": "firmware/wave_sniff_s3.bin", "offset": 0 }
+      ]
+    }
+  ]
+}

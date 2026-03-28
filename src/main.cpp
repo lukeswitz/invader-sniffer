@@ -723,7 +723,7 @@ static void drawTitleBar(bool capturing, bool isBLE) {
 
     if (g_mode == DeviceMode::DETECTION) {
         tcolor = COL_DETECT;
-        title = "DETECTION MODE";
+        title = "AUTOHUNT MODE";
     } else if (capturing) {
         tcolor = COL_CAP;
         if ((millis() / 400) % 2) tcolor = 0xFC1F;

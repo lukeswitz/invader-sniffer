@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Invader Sniffer — Hunt Surveillance</title>
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #060a08;
+      color: #d4f5dc;
+      font-family: 'Courier New', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 1.5rem;
+    }
+
+    canvas#radar-bg {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      opacity: 0.45;
+    }
+
+    .page {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 560px;
+      display: flex;
+      flex-direction: column;
+      gap: 2.4rem;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      text-align: center;
+    }
+
+    #crab-logo { image-rendering: pixelated; display: block; }
+
+    h1 {
+      font-size: 2.6rem;
+      font-weight: 900;
+      letter-spacing: 0.2em;
+      color: #00ff64;
+      text-shadow: 0 0 24px rgba(0,255,100,0.45);
+      line-height: 1;
+    }
+    h1 em {
+      font-style: normal;
+      color: #00e5ff;
+      text-shadow: 0 0 20px rgba(0,229,255,0.4);
+    }
+
+    .tagline {
+      font-size: 0.7rem;
+      color: #3a6645;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .alert {
+      font-size: 0.68rem;
+      color: #ff5050;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.85;
+    }
+
+    /* ── Flash ── */
+    .flash-section { display: flex; flex-direction: column; gap: 1rem; }
+
+    .flash-label {
+      font-size: 0.65rem;
+      color: #3a6645;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+    }
+
+    .flash-buttons {
+      display: flex;
+      gap: 1.2rem;
+      flex-wrap: wrap;
+    }
+
+    .flash-item {
+      flex: 1 1 200px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .flash-item span {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #6bbf7a;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    esp-web-install-button {
+      --esp-tools-button-color: #0f2415;
+      --esp-tools-button-text-color: #00ff64;
+    }
+
+    /* ── CLI ── */
+    .cli-label {
+      font-size: 0.65rem;
+      color: #3a6645;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      margin-bottom: 0.45rem;
+    }
+
+    pre {
+      background: #0a120c;
+      border-left: 2px solid #00ff64;
+      padding: 0.8rem 1rem;
+      font-size: 0.75rem;
+      color: #00ff64;
+      text-shadow: 0 0 8px rgba(0,255,100,0.25);
+      overflow-x: auto;
+      white-space: pre;
+    }
+
+    /* ── Divider ── */
+    hr {
+      border: none;
+      border-top: 1px solid #1a2e1f;
+    }
+
+    /* ── Privacy ── */
+    .privacy { display: flex; flex-direction: column; gap: 1.4rem; }
+
+    .privacy-banner {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #b8962a;
+      text-align: center;
+    }
+
+    .privacy-links { display: flex; flex-direction: column; gap: 1rem; }
+
+    .plink { display: flex; flex-direction: column; gap: 0.2rem; }
+
+    .plink a {
+      font-size: 1rem;
+      font-weight: 700;
+      text-decoration: none;
+      letter-spacing: 0.04em;
+    }
+    .plink a:hover { text-decoration: underline; }
+    .plink a.eff     { color: #ffd700; }
+    .plink a.deflock { color: #ff4444; }
+
+    .plink p {
+      font-size: 0.7rem;
+      color: #3a6645;
+      line-height: 1.5;
+    }
+
+    /* ── Notice ── */
+    .notice {
+      font-size: 0.65rem;
+      color: #253b29;
+      text-align: center;
+      line-height: 1.8;
+    }
+    .notice a { color: #2e5235; }
+    .notice a:hover { text-decoration: underline; }
+
+    /* CRT scanlines */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.05) 2px,
+        rgba(0,0,0,0.05) 4px
+      );
+      pointer-events: none;
+      z-index: 999;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="radar-bg"></canvas>
+
+<div class="page">
+
+  <div class="header">
+    <canvas id="crab-logo"></canvas>
+    <h1>INVADER <em>SNIFFER</em></h1>
+    <p class="tagline">ESP32-S3 &bull; WiFi + BLE capture &bull; PCAP &bull; Target detection</p>
+    <p class="alert">Detects FLOCK ALPR cameras &bull; Meta Ray-Ban &bull; custom OUI + name targets</p>
+  </div>
+
+  <div class="flash-section">
+    <p class="flash-label">Flash firmware &mdash; Chrome / Edge required</p>
+    <div class="flash-buttons">
+      <div class="flash-item">
+        <span>Standard board</span>
+        <esp-web-install-button manifest="manifest_standard.json"></esp-web-install-button>
+      </div>
+      <div class="flash-item">
+        <span>USB-C 1.47B board</span>
+        <esp-web-install-button manifest="manifest_usbc.json"></esp-web-install-button>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <p class="cli-label">CLI one-liner &mdash; macOS / Linux</p>
+    <pre>bash &lt;(curl -fsSL https://raw.githubusercontent.com/lukeswitz/invader-sniffer/main/flash.sh)</pre>
+  </div>
+
+  <hr />
+
+  <div class="privacy">
+    <p class="privacy-banner">&#9632; Mass surveillance is a threat to democracy &#9632;</p>
+    <div class="privacy-links">
+      <div class="plink">
+        <a href="https://www.eff.org" target="_blank" rel="noopener" class="eff">Electronic Frontier Foundation &rarr;</a>
+        <p>Defending digital rights and civil liberties since 1990. Know your rights. Fight surveillance.</p>
+      </div>
+      <div class="plink">
+        <a href="https://deflock.org" target="_blank" rel="noopener" class="deflock">deFlock &rarr;</a>
+        <p>Community-built map of FLOCK Safety ALPR cameras. Know where you&rsquo;re being tracked.</p>
+      </div>
+    </div>
+  </div>
+
+  <p class="notice">
+    Requires Chrome or Edge with WebSerial. Hold BOOT and tap RST to enter flashing mode.<br>
+    <a href="https://github.com/lukeswitz/invader-sniffer">github.com/lukeswitz/invader-sniffer</a>
+    &mdash;
+    <a href="https://github.com/lukeswitz/invader-sniffer/blob/main/README.md">Docs</a>
+    &mdash; for authorized security research only.
+  </p>
+
+</div>
+
+<script>
+// ── Pixel-art invader crab ──────────────────────────────────────────────────
+(function () {
+  const SPRITE = [
+    [0,0,1,0,0,0,0,0,1,0,0],
+    [0,0,0,1,0,0,0,1,0,0,0],
+    [0,0,1,1,1,1,1,1,1,0,0],
+    [0,1,1,0,1,1,1,0,1,1,0],
+    [1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,1,1,1,1,1,1,1,0,1],
+    [1,0,1,0,0,0,0,0,1,0,1],
+    [0,0,0,1,0,0,0,1,0,0,0],
+  ];
+  const PX  = 8;
+  const cvs = document.getElementById('crab-logo');
+  cvs.width  = SPRITE[0].length * PX;
+  cvs.height = SPRITE.length    * PX;
+  const ctx  = cvs.getContext('2d');
+  let tick = 0;
+
+  (function draw() {
+    ctx.clearRect(0, 0, cvs.width, cvs.height);
+    const p = 0.55 + 0.45 * Math.sin(tick * 0.05);
+    ctx.shadowColor = `rgba(0,255,100,${p * 0.7})`;
+    ctx.shadowBlur  = 8;
+    ctx.fillStyle   = `rgba(0,${Math.floor(180 + 75 * p)},70,1)`;
+    SPRITE.forEach((row, r) =>
+      row.forEach((on, c) => { if (on) ctx.fillRect(c * PX, r * PX, PX - 1, PX - 1); })
+    );
+    tick++;
+    requestAnimationFrame(draw);
+  })();
+})();
+
+// ── Radar background ────────────────────────────────────────────────────────
+(function () {
+  const cvs = document.getElementById('radar-bg');
+  const ctx  = cvs.getContext('2d');
+
+  const NEUTRAL = ['WIFI AP', 'BLE BEACON', 'UNKNOWN', '802.11 MGT', 'BT LE ADV'];
+  const THREATS = ['FLOCK CAM', 'ALPR NODE', 'META GLASSES', 'AXIS CAM', 'BLE TRACKER'];
+
+  let W, H, cx, cy, R, angle = 0;
+  const blips = [];
+
+  function resize() {
+    W = cvs.width  = window.innerWidth;
+    H = cvs.height = window.innerHeight;
+    cx = W / 2; cy = H / 2;
+    R  = Math.min(W, H) * 0.44;
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function frame() {
+    ctx.clearRect(0, 0, W, H);
+
+    // Rings
+    for (let i = 1; i <= 4; i++) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, R * i / 4, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(0,160,50,0.1)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // Crosshairs
+    ctx.strokeStyle = 'rgba(0,160,50,0.07)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy);
+    ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R);
+    ctx.stroke();
+
+    // Outer ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(0,160,50,0.18)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Sweep trail
+    const TRAIL = 55;
+    for (let i = 0; i < TRAIL; i++) {
+      const a = angle - (i / TRAIL) * (Math.PI * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + R * Math.cos(a), cy + R * Math.sin(a));
+      ctx.strokeStyle = `rgba(0,255,80,${((TRAIL - i) / TRAIL) * 0.18})`;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+
+    // Leading line
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + R * Math.cos(angle), cy + R * Math.sin(angle));
+    ctx.strokeStyle = 'rgba(0,255,90,0.8)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Center
+    ctx.beginPath();
+    ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,255,90,0.6)';
+    ctx.fill();
+
+    // Spawn blips at sweep
+    if (Math.random() < 0.038) {
+      const r = R * (0.15 + Math.random() * 0.78);
+      const threat = Math.random() < 0.22;
+      blips.push({
+        x: cx + r * Math.cos(angle + (Math.random() * 0.06 - 0.03)),
+        y: cy + r * Math.sin(angle + (Math.random() * 0.06 - 0.03)),
+        age: 0,
+        maxAge: 180 + Math.random() * 140,
+        threat,
+        label: threat
+          ? THREATS [Math.floor(Math.random() * THREATS.length)]
+          : NEUTRAL[Math.floor(Math.random() * NEUTRAL.length)],
+        showLabel: Math.random() < 0.5,
+      });
+    }
+
+    // Draw blips
+    ctx.font = '9px "Courier New", monospace';
+    for (let i = blips.length - 1; i >= 0; i--) {
+      const b = blips[i];
+      b.age++;
+      if (b.age > b.maxAge) { blips.splice(i, 1); continue; }
+      const t = b.age / b.maxAge;
+      const a = t < 0.1 ? t * 10 : t > 0.72 ? (1 - t) / 0.28 : 1;
+
+      if (b.threat) {
+        const sz = 6;
+        ctx.strokeStyle = `rgba(255,50,50,${a * 0.85})`;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(b.x - sz, b.y - sz, sz * 2, sz * 2);
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 1.8, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(255,70,70,${a})`;
+        ctx.fill();
+        if (b.showLabel) {
+          ctx.fillStyle = `rgba(255,70,70,${a * 0.85})`;
+          ctx.fillText(b.label, b.x + 10, b.y - 3);
+        }
+      } else {
+        ctx.shadowBlur  = 5;
+        ctx.shadowColor = `rgba(0,255,90,${a * 0.4})`;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0,255,90,${a * 0.7})`;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        if (b.showLabel) {
+          ctx.fillStyle = `rgba(0,190,65,${a * 0.55})`;
+          ctx.fillText(b.label, b.x + 7, b.y + 3);
+        }
+      }
+    }
+
+    angle += 0.018;
+    requestAnimationFrame(frame);
+  }
+  frame();
+})();
+</script>
+
+</body>
+</html>
