@@ -1,8 +1,6 @@
-# Waveshare 1.47" ESP32-S3 Hybrid Sniffer
+# Invader Sniffer 👾
 
 ![Build](https://github.com/lukeswitz/invader-sniffer/actions/workflows/build.yml/badge.svg)
-
-> **Forked from [nitekry/invader-sniffer](https://github.com/nitekry/invader-sniffer)** — ported and extended for the [Waveshare ESP32-S3 1.47" display board](https://www.waveshare.com/esp32-s3-lcd-1.47.htm). Credit and thanks to the original author for the core sniffer concept and pixel-art mascot.
 
 A dual-mode WiFi and BLE packet sniffer that captures to PCAP files on an SD card. Supports OUI and name-based target detection with auto-capture, a detection sweep mode, Meta Ray-Ban and Flock (Axis) auto-alerts, and a config web UI.
 
@@ -10,16 +8,14 @@ Built for the Waveshare ESP32-S3 1.47" display board (two variants: standard and
 
 ---
 
-## Legal Disclaimer
-
-**This tool is provided for authorized security research, network diagnostics, and educational purposes only.**
-
-Capturing wireless packets may be illegal without explicit authorization from the network owner and all parties whose data may be captured. Before using this device, you are solely responsible for:
-
-- Obtaining written permission from the owner of any network or device you monitor.
-- Complying with all applicable laws in your jurisdiction, including but not limited to the Electronic Communications Privacy Act (ECPA), the Computer Fraud and Abuse Act (CFAA), the GDPR, and equivalent national and regional statutes.
-
-**The authors accept no liability for misuse.**
+> [!IMPORTANT]
+> Legal Disclaimer
+> **This tool is provided for authorized security research, network diagnostics, and educational purposes only.**
+>
+> Capturing wireless packets may be illegal without explicit authorization from the network owner and all parties whose data may be captured. Before using this device, you are solely responsible for: Obtaining written permission from the owner of any network or device you monitor.
+>
+> Complying with all applicable laws in your jurisdiction, including but not limited to the Electronic Communications Privacy Act (ECPA), the Computer Fraud and Abuse Act (CFAA), the GDPR, and equivalent national and regional statutes.
+> **The authors accept no liability for misuse.**
 
 ---
 
@@ -69,7 +65,7 @@ Single-tap toggles capture on/off. Double-tap cycles through three idle modes:
 
 ```
 WiFi idle  ->  BLE idle  ->  Detection  ->  WiFi idle  -> ...
- (green)       (blue)        (purple)
+ (red)       (blue)        (purple)
 ```
 
 ### WiFi Capture
@@ -89,11 +85,9 @@ WiFi idle  ->  BLE idle  ->  Detection  ->  WiFi idle  -> ...
 
 Detection mode runs a passive sweep looking for configured targets on both radios simultaneously, then auto-starts a focused pcap when one is found.
 
-- **WiFi**: hops channels 1, 6, 11 only
-- **BLE**: passive scan running concurrently via ESP32 coexistence (~31% BLE / ~69% WiFi radio time)
+- **WiFi**: hops channels 1, 6, 11 only for speed (the known channels for these devices)
+- **BLE**: passive scan running concurrently via ESP32 coexistence (~31% BLE / ~69% WiFi radio time. BLE scans faster so less time is required)
 - **On target seen**: immediately starts pcap on the radio that detected it and switches to capture mode
-- Display shows purple theme with 3-bar channel activity map (ch 1, 6, 11) and "HUNTING ON WIFI+BLE"
-- LED pulses purple
 
 ### PCAP Format
 
