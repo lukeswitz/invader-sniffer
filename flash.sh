@@ -74,9 +74,9 @@ python3 -m esptool \
   --port "$PORT" \
   --baud 921600 \
   write_flash \
-  --flash_mode qio \
-  --flash_freq 80m \
-  --flash_size 16MB \
+  --flash-mode dio \
+  --flash-freq 80m \
+  --flash-size 16MB \
   0x0 "$TMP"
 
 echo ""

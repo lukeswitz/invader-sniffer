@@ -46,8 +46,8 @@ jobs:
         run: |
           BUILD=.pio/build/${{ matrix.env }}
           BOOT_APP=$(find ~/.platformio -name "boot_app0.bin" | head -1)
-          python -m esptool --chip esp32s3 merge_bin \
-            --flash_mode qio --flash_freq 80m --flash_size 16MB \
+          python -m esptool --chip esp32s3 merge-bin \
+            --flash-mode dio --flash-freq 80m --flash-size 16MB \
             -o ${{ matrix.env }}.bin \
             0x0000 "$BUILD/bootloader.bin" \
             0x8000 "$BUILD/partitions.bin" \
