@@ -4,9 +4,13 @@
 
 ![Build](https://github.com/lukeswitz/invader-sniffer/actions/workflows/build.yml/badge.svg)
 
-A dual-mode WiFi and BLE packet sniffer that captures to PCAP files on an SD card. Supports OUI and name-based target detection with auto-capture, a detection sweep mode, Meta Ray-Ban and Flock (Axis) auto-alerts, and a config web UI.
+Built for the Waveshare ESP32-S3 1.47" display boards: (non-touchscreen) standard and USB-C/1.47B.
 
-Built for the Waveshare ESP32-S3 1.47" display board in two variants: standard and USB-C/1.47B.
+A tri-mode, EDC sized WiFi and BLE packet sniffer 
+   - Captures PCAP to microSD on demand or detection
+   - Supports OUI and name-based targets
+   - Detection sweep mode: Meta Ray-Ban and Flock default 
+   - Optional WiFi AP configurable targets
 
 > [!WARNING]
 > Use only where you have explicit authorization. Capturing wireless traffic, monitoring devices, or spoofing identifiers may be illegal in your jurisdiction.
@@ -15,11 +19,10 @@ Built for the Waveshare ESP32-S3 1.47" display board in two variants: standard a
 
 - [Features](#features)
 - [Boot Sequence](#boot-sequence)
+- [Controls](#controls)
 - [Device Modes](#device-modes)
 - [Target Detection](#target-detection)
 - [LED Colors](#led-colors)
-- [Display](#display)
-- [Controls](#controls)
 - [Building](#building)
 - [Flashing](#flashing)
 - [Companion: BLE OUI Spoofer](#companion-ble-oui-spoofer)
@@ -40,9 +43,64 @@ Built for the Waveshare ESP32-S3 1.47" display board in two variants: standard a
 - **Config web UI** — WiFi AP on boot for managing custom targets
 - **USB MSC mode** — plug into a computer to mount the SD card as a drive
 
+
 ## Boot Sequence
 
-Power on -> USB host detected? -> MSC mode (SD card as USB drive) -> No USB host -> Config AP (30s) -> Capture mode
+```
+Power on -> USB host detected? -> MSC mode (SD card as USB drive) BOOT to exit -> 
+Config AP (30s) BOOT to skip -> Capture mode
+```
+
+---
+
+## LED Colors
+
+| State             | Color             | Pattern                  |
+| ----------------- | ----------------- | ------------------------ |
+| WiFi idle         | Red               | Slow sine pulse          |
+| BLE idle          | Blue              | Slow sine pulse          |
+| Detection mode    | Purple            | Slow sine pulse          |
+| WiFi capturing    | Green             | Random flicker           |
+| WiFi packet flash | Yellow            | 80 ms flash              |
+| BLE capturing     | Blue              | Slow sine pulse          |
+| Custom target hit | Yellow/warm white | 150 ms alternating flash |
+| FLOCK (Axis) hit  | Red               | 50 ms rapid strobe       |
+| Meta Ray-Ban hit  | Cyan              | 600 ms sine pulse        |
+
+
+## Controls
+
+### Button (GPIO 0 / BOOT)
+
+| Press                      | Action                                   |
+| -------------------------- | ---------------------------------------- |
+| Single tap                 | Toggle capture on/off                    |
+| Double tap (within 500 ms) | Cycle mode: WiFi -> BLE -> Detection     |
+| Hold during MSC mode       | Restart into capture mode                |
+| Press during config        | Skip config, enter capture immediately   |
+
+### Serial (115200 baud)
+
+| Key       | Action      |
+| --------- | ----------- |
+| `s` / `S` | Toggle capture |
+| `m` / `M` | Switch mode |
+
+### Display
+
+**Title Bar**
+
+Shows current mode: `WIFI CAPTURE`, `BLE CAPTURE`, or `DETECTION MODE`.
+
+**Status Bar**
+
+During capture: filename, packet count, channel (WiFi), drop count.
+Idle: `WIFI READY`, `BLE READY`, or `DETECTION ACTIVE`.
+
+**Channel Activity Map**
+
+**WiFi capture**: 14 bars for channels 1–14. Height indicates dwell weight. Current channel is white, high traffic is magenta, primary (1/6/11) is green, others are red.
+
 
 ### USB MSC Mode
 
@@ -134,53 +192,6 @@ BLE random address type bits (top 2 bits of byte 0) are masked before OUI compar
 
 Connect to `SNIFF-CONFIG`, navigate to `http://192.168.4.1`. Enter a name (supports `*` wildcard) and up to 5 OUIs in `AA:BB:CC` format. OUIs are optional; name-only targets match by device name or SSID wildcard.
 
-## LED Colors
-
-| State             | Color             | Pattern                  |
-| ----------------- | ----------------- | ------------------------ |
-| WiFi idle         | Red               | Slow sine pulse          |
-| BLE idle          | Blue              | Slow sine pulse          |
-| Detection mode    | Purple            | Slow sine pulse          |
-| WiFi capturing    | Green             | Random flicker           |
-| WiFi packet flash | Yellow            | 80 ms flash              |
-| BLE capturing     | Blue              | Slow sine pulse          |
-| Custom target hit | Yellow/warm white | 150 ms alternating flash |
-| FLOCK (Axis) hit  | Red               | 50 ms rapid strobe       |
-| Meta Ray-Ban hit  | Cyan              | 600 ms sine pulse        |
-
-## Display
-
-### Title Bar
-
-Shows current mode: `WIFI CAPTURE`, `BLE CAPTURE`, or `DETECTION MODE`.
-
-### Status Bar
-
-During capture: filename, packet count, channel (WiFi), drop count.
-Idle: `WIFI READY`, `BLE READY`, or `DETECTION ACTIVE`.
-
-### Channel Activity Map
-
-**WiFi capture**: 14 bars for channels 1–14. Height indicates dwell weight. Current channel is white, high traffic is magenta, primary (1/6/11) is green, others are red.
-
-## Controls
-
-### Button (GPIO 0 / BOOT)
-
-| Press                      | Action                                   |
-| -------------------------- | ---------------------------------------- |
-| Single tap                 | Toggle capture on/off                    |
-| Double tap (within 500 ms) | Cycle mode: WiFi -> BLE -> Detection     |
-| Hold during MSC mode       | Restart into capture mode                |
-| Press during config        | Skip config, enter capture immediately   |
-
-### Serial (115200 baud)
-
-| Key       | Action      |
-| --------- | ----------- |
-| `s` / `S` | Toggle capture |
-| `m` / `M` | Switch mode |
-
 ## Building
 
 Requires PlatformIO.
@@ -257,8 +268,10 @@ ble_0000.pcap
 
 ---
 
+
 ## Legal Disclaimer
 
+```
 This tool is provided for authorized security research, network diagnostics, and educational purposes only.
 
 Capturing wireless packets and spoofing MAC/BLE addresses may be illegal without explicit authorization from the network owner and all parties whose data may be captured. Before using this device, you are solely responsible for:
@@ -269,11 +282,14 @@ Capturing wireless packets and spoofing MAC/BLE addresses may be illegal without
 - Passive promiscuous WiFi capture of 802.11 management and data frames, and BLE advertisement scanning, may expose personally identifiable information (MAC addresses, device names, payload data). Handle all captured data responsibly.
 
 The authors accept no liability for misuse. Use of this software in violation of any law is strictly prohibited and entirely your own responsibility.
+```
 
 ## Liability
 
+```
 Any images, graphics, logos, screenshots, or other visual materials included in this project are provided "as is" for informational or illustrative purposes only. The project maintainers make no representations or warranties regarding ownership, licensing status, accuracy, non-infringement, or fitness for any particular purpose of such materials, except where explicitly stated.
 
 GitHub, the GitHub logo, Meta, and the Meta logo are trademarks or registered trademarks of their respective owners. Any references, names, marks, logos, screenshots, or other brand assets are used solely for identification, commentary, compatibility, or informational purposes where applicable. Their use does not imply any affiliation with, endorsement by, sponsorship from, or approval by those trademark owners.
 
 Users are responsible for ensuring their own use, redistribution, modification, or publication complies with applicable trademark, copyright, and other intellectual property laws.
+```
