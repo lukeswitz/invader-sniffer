@@ -262,10 +262,12 @@ static uint16_t blePhdrFlags(
     bool noiseValid,
     bool refAaValid
 ) {
-    uint16_t flags = 0u;
-    if (signalValid) flags |= 0x0001u;
-    if (noiseValid) flags |= 0x0002u;
-    if (refAaValid) flags |= 0x0008u;
+    uint16_t flags = 0x0001u;
+    if (signalValid) flags |= 0x0002u;
+    if (noiseValid)  flags |= 0x0004u;
+    if (refAaValid)  flags |= 0x0010u;
+    flags |= 0x0400u;
+    flags |= 0x0800u;
     return flags;
 }
 
@@ -1510,8 +1512,7 @@ static void enqueueBleAdvFrame(
     phdr.flags = blePhdrFlags(true, false, true);
 
     uint16_t ll_len = (uint16_t)(4u + 2u + 6u + payload_len + 3u);
-    uint16_t full_len = (uint16_t)(sizeof(BleLlWithPhdrHeader) + 
-                                   ll_len);
+    uint16_t full_len = (uint16_t)(sizeof(BleLlWithPhdrHeader) + ll_len);
 
     uint8_t *buf = (uint8_t *)heap_caps_malloc(
         full_len,
@@ -1533,8 +1534,7 @@ static void enqueueBleAdvFrame(
     *p++ = 0x8Eu;
     *p++ = pdu_hdr0;
     *p++ = pdu_hdr1;
-    memcpy(p, bda, 6u);
-    p += 6u;
+    for (int i = 5; i >= 0; i--) *p++ = bda[i];
 
     if (payload_len > 0u) {
         memcpy(p, payload, payload_len);
@@ -1543,7 +1543,7 @@ static void enqueueBleAdvFrame(
 
     uint32_t crc = ble_crc24(
         buf + sizeof(BleLlWithPhdrHeader) + 4u,
-        (size_t)(2u + 6u + payload_len)
+        2u + 6u + payload_len
     );
     *p++ = (uint8_t)(crc);
     *p++ = (uint8_t)(crc >> 8u);
