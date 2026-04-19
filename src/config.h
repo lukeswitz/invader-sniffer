@@ -14,22 +14,69 @@ struct TargetOUI {
 
 enum class SpecialHit { NONE, EVIL_BIRD, RAYBAN };
 
-static const uint8_t EVIL_BIRD_OUIS[7][3] = {
-    {0xD4, 0x11, 0xD6},  // Axis Communications
-    {0x00, 0x17, 0x3D},  // Axis Communications
-    {0xE0, 0x0A, 0xF6},  // Axis Communications
-    {0x00, 0x25, 0xDF},  // Axis Communications
-    {0xB4, 0x1E, 0x52},  // Axis Communications
-    {0x00, 0x50, 0xC2},  // Leonardo UK Ltd
-    {0x00, 0x80, 0xE7},  // Leonardo UK Ltd
+static const uint8_t EVIL_BIRD_OUIS[][3] = {
+    // Flock Safety
+    {0xB4, 0x1E, 0x52},
+    {0x58, 0x8E, 0x81},
+    {0xEC, 0x1B, 0xBD},
+    {0x90, 0x35, 0xEA},
+    {0x04, 0x0D, 0x84},
+    {0xF0, 0x82, 0xC0},
+    {0x1C, 0x34, 0xF1},
+    {0x38, 0x5B, 0x44},
+    {0x94, 0x34, 0x69},
+    {0xB4, 0xE3, 0xF9},
+    {0x70, 0xC9, 0x4E},
+    {0x3C, 0x91, 0x80},
+    {0xD8, 0xF3, 0xBC},
+    {0x80, 0x30, 0x49},
+    {0x14, 0x5A, 0xFC},
+    {0x74, 0x4C, 0xA1},
+    {0x08, 0x3A, 0x88},
+    {0x9C, 0x2F, 0x9D},
+    {0x94, 0x08, 0x53},
+    {0xE4, 0xAA, 0xEA},
+    // Flock contract manufacturers
+    {0xF4, 0x6A, 0xDD},
+    {0xF8, 0xA2, 0xD6},
+    {0xE0, 0x0A, 0xF6},
+    {0x00, 0xF4, 0x8D},
+    {0xD0, 0x39, 0x57},
+    {0xE8, 0xD0, 0xFC},
+    // SoundThinking (ShotSpotter)
+    {0xD4, 0x11, 0xD6},
+    // Neology
+    {0x00, 0x17, 0x3D},
+    // Axon
+    {0x00, 0x25, 0xDF},
+    // GENETEC
+    {0x00, 0x0A, 0xB1},
+    {0x00, 0x50, 0xC2},
+    {0x00, 0xBF, 0x15},
+    // Leonardo UK Ltd
+    {0x00, 0x80, 0xE7},
 };
+static constexpr int EVIL_BIRD_OUI_COUNT =
+    (int)(sizeof(EVIL_BIRD_OUIS) / sizeof(EVIL_BIRD_OUIS[0]));
 
-static const uint8_t RAYBAN_OUIS[4][3] = {
-    {0x7C, 0x2A, 0x9E},  // Meta Ray-Ban
-    {0xCC, 0x66, 0x0A},  // Meta Ray-Ban
-    {0xF4, 0x03, 0x43},  // Meta Ray-Ban
-    {0x5C, 0xE9, 0x1E},  // Meta Ray-Ban
+static const uint8_t RAYBAN_OUIS[][3] = {
+    {0x7C, 0x2A, 0x9E},
+    {0xCC, 0x66, 0x0A},
+    {0xF4, 0x03, 0x43},
+    {0x5C, 0xE9, 0x1E},
 };
+static constexpr int RAYBAN_OUI_COUNT =
+    (int)(sizeof(RAYBAN_OUIS) / sizeof(RAYBAN_OUIS[0]));
+
+// Hardcoded BLE/WiFi name patterns (case-insensitive, * wildcard)
+static const char* const EVIL_BIRD_NAMES[] = {
+    "FS Ext Battery",
+    "Penguin*",
+    "Flock*",
+    "Pigvision*",
+};
+static constexpr int EVIL_BIRD_NAME_COUNT =
+    (int)(sizeof(EVIL_BIRD_NAMES) / sizeof(EVIL_BIRD_NAMES[0]));
 
 // Mask the top 2 bits of the first byte before comparing — they encode the
 // BLE random-address type and are not part of the OUI.  This lets the spoofer
@@ -39,17 +86,47 @@ static inline uint8_t ouiByte0(uint8_t b) { return b & 0x3Fu; }
 
 inline SpecialHit checkSpecialOUI(const uint8_t* bda) {
     if (!bda) return SpecialHit::NONE;
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < EVIL_BIRD_OUI_COUNT; i++) {
         if (ouiByte0(bda[0]) == ouiByte0(EVIL_BIRD_OUIS[i][0]) &&
             bda[1] == EVIL_BIRD_OUIS[i][1] &&
             bda[2] == EVIL_BIRD_OUIS[i][2])
             return SpecialHit::EVIL_BIRD;
     }
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < RAYBAN_OUI_COUNT; i++) {
         if (ouiByte0(bda[0]) == ouiByte0(RAYBAN_OUIS[i][0]) &&
             bda[1] == RAYBAN_OUIS[i][1] &&
             bda[2] == RAYBAN_OUIS[i][2])
             return SpecialHit::RAYBAN;
+    }
+    return SpecialHit::NONE;
+}
+
+// Case-insensitive wildcard match (same algorithm as OUIConfig::matchWildcard)
+static bool matchWildcardCI(const char* pat, const char* str) {
+    while (*pat && *str) {
+        if (*pat == '*') {
+            ++pat;
+            if (!*pat) return true;
+            while (*str) {
+                if (matchWildcardCI(pat, str)) return true;
+                ++str;
+            }
+            return false;
+        }
+        char p = (*pat >= 'A' && *pat <= 'Z') ? *pat + 32 : *pat;
+        char s = (*str >= 'A' && *str <= 'Z') ? *str + 32 : *str;
+        if (p != s) return false;
+        ++pat; ++str;
+    }
+    while (*pat == '*') ++pat;
+    return !*pat && !*str;
+}
+
+inline SpecialHit checkSpecialName(const char* name) {
+    if (!name || !name[0]) return SpecialHit::NONE;
+    for (int i = 0; i < EVIL_BIRD_NAME_COUNT; i++) {
+        if (matchWildcardCI(EVIL_BIRD_NAMES[i], name))
+            return SpecialHit::EVIL_BIRD;
     }
     return SpecialHit::NONE;
 }
@@ -135,30 +212,14 @@ public:
     }
 
     static bool matchWildcard(const char* pat, const char* str) {
-        while (*pat && *str) {
-            if (*pat == '*') {
-                ++pat;
-                if (!*pat) return true;
-                while (*str) {
-                    if (matchWildcard(pat, str)) return true;
-                    ++str;
-                }
-                return false;
-            }
-            char p = (*pat >= 'A' && *pat <= 'Z') ? *pat + 32 : *pat;
-            char s = (*str >= 'A' && *str <= 'Z') ? *str + 32 : *str;
-            if (p != s) return false;
-            ++pat; ++str;
-        }
-        while (*pat == '*') ++pat;
-        return !*pat && !*str;
+        return matchWildcardCI(pat, str);
     }
 
     bool isNameTarget(const char* devName) const {
         if (!devName || !devName[0]) return false;
         for (int i = 0; i < targetCount; i++) {
             if (!targets[i].name[0]) continue;
-            if (matchWildcard(targets[i].name, devName)) return true;
+            if (matchWildcardCI(targets[i].name, devName)) return true;
         }
         return false;
     }
@@ -170,7 +231,7 @@ public:
                 if (targets[i].ouis[j][0] == 0 &&
                     targets[i].ouis[j][1] == 0 &&
                     targets[i].ouis[j][2] == 0) continue;
-                
+
                 if (bda[0] == targets[i].ouis[j][0] &&
                     bda[1] == targets[i].ouis[j][1] &&
                     bda[2] == targets[i].ouis[j][2]) {

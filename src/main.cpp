@@ -1349,10 +1349,17 @@ void wifiSniffer(void *buf, wifi_promiscuous_pkt_type_t type) {
         // Check SSID against target name patterns
         if (!g_targetHit) {
             char ssid[33] = {0};
-            if (extractSSID(frame, payload_len, ssid, sizeof(ssid)) &&
-                g_ouiConfig.isNameTarget(ssid)) {
-                g_targetHit = true;
-                Serial.printf("[target] WiFi SSID match: %s\n", ssid);
+            if (extractSSID(frame, payload_len, ssid, sizeof(ssid))) {
+                if (g_ouiConfig.isNameTarget(ssid)) {
+                    g_targetHit = true;
+                    Serial.printf("[target] WiFi SSID match: %s\n", ssid);
+                }
+                SpecialHit nameHit = checkSpecialName(ssid);
+                if (nameHit != SpecialHit::NONE) {
+                    g_targetHit = true;
+                    g_specialType = nameHit;
+                    Serial.printf("[special] WiFi SSID match: %s\n", ssid);
+                }
             }
         }
 
@@ -1620,10 +1627,19 @@ static void bleScanResultHandler(
             }
             pos += adLen + 1;
         }
-        if (bleName[0] && g_ouiConfig.isNameTarget(bleName)) {
-            g_targetHit = true;
-            targetFound = true;
-            Serial.printf("[target] BLE name match: %s\n", bleName);
+        if (bleName[0]) {
+            if (g_ouiConfig.isNameTarget(bleName)) {
+                g_targetHit = true;
+                targetFound = true;
+                Serial.printf("[target] BLE name match: %s\n", bleName);
+            }
+            SpecialHit nameHit = checkSpecialName(bleName);
+            if (nameHit != SpecialHit::NONE) {
+                g_targetHit = true;
+                g_specialType = nameHit;
+                targetFound = true;
+                Serial.printf("[special] BLE name match: %s\n", bleName);
+            }
         }
     }
 
@@ -1918,12 +1934,8 @@ void switchCaptureMode() {
 
 void cycleCaptureMode() {
     // Cycle: WIFI idle -> BLE idle -> DETECTION idle -> WIFI idle -> ...
-    if (g_mode == DeviceMode::CAPTURING) return;  // no cycling while capturing
-
-    // Stop detection if active before cycling away
-    if (g_mode == DeviceMode::DETECTION) {
-        stopDetection();
-    }
+    // No cycling while actively capturing or detecting — double-tap to stop first
+    if (g_mode == DeviceMode::CAPTURING || g_mode == DeviceMode::DETECTION) return;
 
     if (g_detectionSelected) {
         // DETECTION -> WIFI idle
@@ -2122,7 +2134,7 @@ void loop() {
 
     if (
         (g_mode == DeviceMode::CAPTURING || g_mode == DeviceMode::DETECTION) &&
-        g_captureMode == CaptureMode::WIFI &&
+        (g_captureMode == CaptureMode::WIFI || g_mode == DeviceMode::DETECTION) &&
         g_hopRequested
     ) {
         g_hopRequested = false;

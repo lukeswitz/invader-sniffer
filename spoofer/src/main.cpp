@@ -7,7 +7,7 @@
 // Serial commands (115200):
 //   n / N       — skip to next OUI immediately
 //   m / M       — force switch to FLOCK (same as BOOT)
-//   0 .. 6      — jump directly to that entry index (FLOCK 0-6, META 0-3)
+//   0 .. 9      — jump directly to that entry index (max per mode)
 //
 
 #include <Arduino.h>
@@ -23,13 +23,46 @@ struct Entry {
 };
 
 static const Entry FLOCK_ENTRIES[] = {
-    { "FLOCK  D4:11:D6", {0xD4, 0x11, 0xD6} },
-    { "FLOCK  00:17:3D", {0x00, 0x17, 0x3D} },
-    { "FLOCK  E0:0A:F6", {0xE0, 0x0A, 0xF6} },
-    { "FLOCK  00:25:DF", {0x00, 0x25, 0xDF} },
+    // Flock Safety
     { "FLOCK  B4:1E:52", {0xB4, 0x1E, 0x52} },
-    { "FLOCK  00:50:C2", {0x00, 0x50, 0xC2} },
-    { "FLOCK  00:80:E7", {0x00, 0x80, 0xE7} },
+    { "FLOCK  58:8E:81", {0x58, 0x8E, 0x81} },
+    { "FLOCK  EC:1B:BD", {0xEC, 0x1B, 0xBD} },
+    { "FLOCK  90:35:EA", {0x90, 0x35, 0xEA} },
+    { "FLOCK  04:0D:84", {0x04, 0x0D, 0x84} },
+    { "FLOCK  F0:82:C0", {0xF0, 0x82, 0xC0} },
+    { "FLOCK  1C:34:F1", {0x1C, 0x34, 0xF1} },
+    { "FLOCK  38:5B:44", {0x38, 0x5B, 0x44} },
+    { "FLOCK  94:34:69", {0x94, 0x34, 0x69} },
+    { "FLOCK  B4:E3:F9", {0xB4, 0xE3, 0xF9} },
+    { "FLOCK  70:C9:4E", {0x70, 0xC9, 0x4E} },
+    { "FLOCK  3C:91:80", {0x3C, 0x91, 0x80} },
+    { "FLOCK  D8:F3:BC", {0xD8, 0xF3, 0xBC} },
+    { "FLOCK  80:30:49", {0x80, 0x30, 0x49} },
+    { "FLOCK  14:5A:FC", {0x14, 0x5A, 0xFC} },
+    { "FLOCK  74:4C:A1", {0x74, 0x4C, 0xA1} },
+    { "FLOCK  08:3A:88", {0x08, 0x3A, 0x88} },
+    { "FLOCK  9C:2F:9D", {0x9C, 0x2F, 0x9D} },
+    { "FLOCK  94:08:53", {0x94, 0x08, 0x53} },
+    { "FLOCK  E4:AA:EA", {0xE4, 0xAA, 0xEA} },
+    // Flock contract manufacturers
+    { "FLOCK  F4:6A:DD", {0xF4, 0x6A, 0xDD} },
+    { "FLOCK  F8:A2:D6", {0xF8, 0xA2, 0xD6} },
+    { "FLOCK  E0:0A:F6", {0xE0, 0x0A, 0xF6} },
+    { "FLOCK  00:F4:8D", {0x00, 0xF4, 0x8D} },
+    { "FLOCK  D0:39:57", {0xD0, 0x39, 0x57} },
+    { "FLOCK  E8:D0:FC", {0xE8, 0xD0, 0xFC} },
+    // SoundThinking (ShotSpotter)
+    { "SHOT   D4:11:D6", {0xD4, 0x11, 0xD6} },
+    // Neology
+    { "NEOLGY 00:17:3D", {0x00, 0x17, 0x3D} },
+    // Axon
+    { "AXON   00:25:DF", {0x00, 0x25, 0xDF} },
+    // GENETEC
+    { "GENTEC 00:0A:B1", {0x00, 0x0A, 0xB1} },
+    { "GENTEC 00:50:C2", {0x00, 0x50, 0xC2} },
+    { "GENTEC 00:BF:15", {0x00, 0xBF, 0x15} },
+    // Leonardo UK Ltd
+    { "LEO UK 00:80:E7", {0x00, 0x80, 0xE7} },
 };
 static constexpr int FLOCK_COUNT = (int)(sizeof(FLOCK_ENTRIES) / sizeof(FLOCK_ENTRIES[0]));
 

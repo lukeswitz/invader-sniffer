@@ -180,12 +180,27 @@ A name-only target (no OUIs) matches purely by name pattern.
 
 ### Hardcoded Special Targets
 
-Always active regardless of SD config.
+Always active regardless of SD config. 33 OUIs across surveillance vendors, plus BLE name patterns.
 
-| Target               | OUIs                                                  | LED Alert         |
-| -------------------- | ----------------------------------------------------- | ----------------- |
-| **FLOCK (Axis/Leonardo)** | `D4:11:D6`, `00:17:3D`, `E0:0A:F6`, `00:25:DF`, `B4:1E:52`, `00:50:C2`, `00:80:E7` | Green rapid strobe |
-| **Meta Ray-Ban**     | `7C:2A:9E`, `CC:66:0A`, `F4:03:43`, `5C:E9:1E`        | Cyan sine pulse   |
+| Vendor / Group | OUIs | LED Alert |
+| --- | --- | --- |
+| **Flock Safety** | `B4:1E:52`, `58:8E:81`, `EC:1B:BD`, `90:35:EA`, `04:0D:84`, `F0:82:C0`, `1C:34:F1`, `38:5B:44`, `94:34:69`, `B4:E3:F9`, `70:C9:4E`, `3C:91:80`, `D8:F3:BC`, `80:30:49`, `14:5A:FC`, `74:4C:A1`, `08:3A:88`, `9C:2F:9D`, `94:08:53`, `E4:AA:EA` | Green rapid strobe |
+| **Flock contract mfg** | `F4:6A:DD`, `F8:A2:D6`, `E0:0A:F6`, `00:F4:8D`, `D0:39:57`, `E8:D0:FC` | Green rapid strobe |
+| **SoundThinking (ShotSpotter)** | `D4:11:D6` | Green rapid strobe |
+| **Neology** | `00:17:3D` | Green rapid strobe |
+| **Axon** | `00:25:DF` | Green rapid strobe |
+| **GENETEC** | `00:0A:B1`, `00:50:C2`, `00:BF:15` | Green rapid strobe |
+| **Leonardo UK** | `00:80:E7` | Green rapid strobe |
+| **Meta Ray-Ban** | `7C:2A:9E`, `CC:66:0A`, `F4:03:43`, `5C:E9:1E` | Cyan sine pulse |
+
+**Hardcoded BLE name patterns** (case-insensitive, triggers FLOCK alert):
+
+| Pattern | Match |
+| --- | --- |
+| `FS Ext Battery` | Exact |
+| `Penguin*` | Starts with |
+| `Flock*` | Starts with |
+| `Pigvision*` | Starts with |
 
 BLE random address type bits (top 2 bits of byte 0) are masked before OUI comparison.
 
@@ -245,7 +260,7 @@ Cycles through all hardcoded target OUIs (Axis/FLOCK and Meta Ray-Ban), advertis
 | BOOT      | Switch META/FLOCK mode |
 | `n` / `N` | Skip to next OUI      |
 | `m` / `M` | Switch mode           |
-| `0`–`6`   | Jump to OUI index (FLOCK: 0–6, META: 0–3) |
+| `0`–`9`   | Jump to OUI index (clamped to current mode count) |
 | `?`       | Print status          |
 
 ```bash
