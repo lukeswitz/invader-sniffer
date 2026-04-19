@@ -7,7 +7,7 @@
 // Serial commands (115200):
 //   n / N       — skip to next OUI immediately
 //   m / M       — force switch to FLOCK (same as BOOT)
-//   0 .. 8      — jump directly to that entry index
+//   0 .. 6      — jump directly to that entry index (FLOCK 0-6, META 0-3)
 //
 
 #include <Arduino.h>
@@ -28,6 +28,8 @@ static const Entry FLOCK_ENTRIES[] = {
     { "FLOCK  E0:0A:F6", {0xE0, 0x0A, 0xF6} },
     { "FLOCK  00:25:DF", {0x00, 0x25, 0xDF} },
     { "FLOCK  B4:1E:52", {0xB4, 0x1E, 0x52} },
+    { "FLOCK  00:50:C2", {0x00, 0x50, 0xC2} },
+    { "FLOCK  00:80:E7", {0x00, 0x80, 0xE7} },
 };
 static constexpr int FLOCK_COUNT = (int)(sizeof(FLOCK_ENTRIES) / sizeof(FLOCK_ENTRIES[0]));
 

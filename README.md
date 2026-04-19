@@ -57,9 +57,10 @@ Config AP (30s) BOOT to skip -> Capture mode
 
 | State             | Color             | Pattern                  |
 | ----------------- | ----------------- | ------------------------ |
-| WiFi idle         | Red               | Slow sine pulse          |
-| BLE idle          | Blue              | Slow sine pulse          |
-| Detection mode    | Purple            | Slow sine pulse          |
+| WiFi idle         | Green             | Slow sine breathe        |
+| BLE idle          | Blue              | Slow sine breathe        |
+| Autohunt idle     | Purple (dim)      | Slow sine breathe        |
+| Autohunt active   | Purple            | Fast sine pulse          |
 | WiFi capturing    | Green             | Random flicker           |
 | WiFi packet flash | Yellow            | 80 ms flash              |
 | BLE capturing     | Blue              | Slow sine pulse          |
@@ -72,30 +73,30 @@ Config AP (30s) BOOT to skip -> Capture mode
 
 ### Button (GPIO 0 / BOOT)
 
-| Press                      | Action                                   |
-| -------------------------- | ---------------------------------------- |
-| Single tap                 | Toggle capture on/off                    |
-| Double tap (within 500 ms) | Cycle mode: WiFi -> BLE -> Detection     |
-| Hold during MSC mode       | Restart into capture mode                |
-| Press during config        | Skip config, enter capture immediately   |
+| Press                      | Action                                       |
+| -------------------------- | -------------------------------------------- |
+| Single tap                 | Cycle mode: WiFi → BLE → Autohunt → WiFi    |
+| Double tap (within 500 ms) | Start / stop capture or detection            |
+| Hold during MSC mode       | Restart into capture mode                    |
+| Press during config        | Skip config, enter capture immediately       |
 
 ### Serial (115200 baud)
 
-| Key       | Action      |
-| --------- | ----------- |
-| `s` / `S` | Toggle capture |
-| `m` / `M` | Switch mode |
+| Key       | Action                |
+| --------- | --------------------- |
+| `s` / `S` | Start / stop capture  |
+| `m` / `M` | Cycle mode            |
 
 ### Display
 
 **Title Bar**
 
-Shows current mode: `WIFI CAPTURE`, `BLE CAPTURE`, or `DETECTION MODE`.
+Shows current mode: `WIFI CAPTURE`, `BLE CAPTURE`, or `AUTOHUNT MODE`.
 
 **Status Bar**
 
 During capture: filename, packet count, channel (WiFi), drop count.
-Idle: `WIFI READY`, `BLE READY`, or `DETECTION ACTIVE`.
+Idle: `WIFI READY`, `BLE READY`, `AUTOHUNT READY`, or `DETECTION ACTIVE`.
 
 **Channel Activity Map**
 
@@ -121,9 +122,9 @@ The web UI lets you add and delete custom targets before capture starts. Press B
 
 ## Device Modes
 
-Single-tap toggles capture on or off. Double-tap cycles through three idle modes:
+Single-tap cycles through three modes. Double-tap starts or stops the current mode:
 
-WiFi idle (red) -> BLE idle (blue) -> Detection (purple) -> WiFi idle
+WiFi idle (green) → BLE idle (blue) → Autohunt idle (purple) → WiFi idle
 
 ### WiFi Capture
 
@@ -138,9 +139,9 @@ WiFi idle (red) -> BLE idle (blue) -> Detection (purple) -> WiFi idle
 - 250 ms deduplication window per device, payload, and event type
 - Frames reconstructed with BLE LL link layer header
 
-### Detection Mode
+### Autohunt / Detection Mode
 
-Detection mode runs a passive sweep looking for configured targets on both radios simultaneously, then auto-starts a focused pcap when one is found.
+Cycle to Autohunt mode, then double-tap to start detection. The device sweeps both radios for configured targets simultaneously, then auto-starts a focused pcap when one is found. Double-tap again to stop.
 
 - **WiFi**: hops channels 1, 6, 11 only for speed
 - **BLE**: passive scan running concurrently via ESP32 coexistence (~31% BLE / ~69% WiFi radio time)
@@ -183,7 +184,7 @@ Always active regardless of SD config.
 
 | Target               | OUIs                                                  | LED Alert         |
 | -------------------- | ----------------------------------------------------- | ----------------- |
-| **Axis IP Camera**   | `D4:11:D6`, `00:17:3D`, `E0:0A:F6`, `00:25:DF`, `B4:1E:52` | Green rapid strobe |
+| **FLOCK (Axis/Leonardo)** | `D4:11:D6`, `00:17:3D`, `E0:0A:F6`, `00:25:DF`, `B4:1E:52`, `00:50:C2`, `00:80:E7` | Green rapid strobe |
 | **Meta Ray-Ban**     | `7C:2A:9E`, `CC:66:0A`, `F4:03:43`, `5C:E9:1E`        | Cyan sine pulse   |
 
 BLE random address type bits (top 2 bits of byte 0) are masked before OUI comparison.
@@ -244,7 +245,7 @@ Cycles through all hardcoded target OUIs (Axis/FLOCK and Meta Ray-Ban), advertis
 | BOOT      | Switch META/FLOCK mode |
 | `n` / `N` | Skip to next OUI      |
 | `m` / `M` | Switch mode           |
-| `0`–`8`   | Jump to OUI index     |
+| `0`–`6`   | Jump to OUI index (FLOCK: 0–6, META: 0–3) |
 | `?`       | Print status          |
 
 ```bash

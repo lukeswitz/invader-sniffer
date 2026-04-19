@@ -14,12 +14,14 @@ struct TargetOUI {
 
 enum class SpecialHit { NONE, EVIL_BIRD, RAYBAN };
 
-static const uint8_t EVIL_BIRD_OUIS[5][3] = {
+static const uint8_t EVIL_BIRD_OUIS[7][3] = {
     {0xD4, 0x11, 0xD6},  // Axis Communications
     {0x00, 0x17, 0x3D},  // Axis Communications
     {0xE0, 0x0A, 0xF6},  // Axis Communications
     {0x00, 0x25, 0xDF},  // Axis Communications
     {0xB4, 0x1E, 0x52},  // Axis Communications
+    {0x00, 0x50, 0xC2},  // Leonardo UK Ltd
+    {0x00, 0x80, 0xE7},  // Leonardo UK Ltd
 };
 
 static const uint8_t RAYBAN_OUIS[4][3] = {
@@ -37,7 +39,7 @@ static inline uint8_t ouiByte0(uint8_t b) { return b & 0x3Fu; }
 
 inline SpecialHit checkSpecialOUI(const uint8_t* bda) {
     if (!bda) return SpecialHit::NONE;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 7; i++) {
         if (ouiByte0(bda[0]) == ouiByte0(EVIL_BIRD_OUIS[i][0]) &&
             bda[1] == EVIL_BIRD_OUIS[i][1] &&
             bda[2] == EVIL_BIRD_OUIS[i][2])

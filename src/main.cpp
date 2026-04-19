@@ -79,6 +79,7 @@ enum class DeviceMode { STOPPED, DETECTION, CAPTURING };
 volatile CaptureMode g_captureMode = CaptureMode::WIFI;
 volatile DeviceMode g_mode = DeviceMode::STOPPED;
 volatile bool g_detectionMode = false;
+static bool g_detectionSelected = false;
 
 
 static constexpr int BOOT_BTN = 0;
@@ -157,6 +158,8 @@ void toggleCapture();
 void switchCaptureMode();
 void cycleCaptureMode();
 bool startCapture();
+void startDetection();
+void stopDetection();
 
 void ARDUINO_ISR_ATTR bootButtonISR() {
     uint32_t now = millis();
@@ -179,11 +182,11 @@ static void handleButton() {
             g_tapTime = millis();
         } else {
             if (millis() - g_tapTime < 500) {
-                Serial.println("[btn] double-tap -> cycle mode");
-                cycleCaptureMode();
+                Serial.println("[btn] double-tap -> start/stop");
+                toggleCapture();
                 g_tapPending = false;
             } else {
-                toggleCapture();
+                cycleCaptureMode();
                 g_tapPending = true;
                 g_tapTime = millis();
             }
@@ -191,8 +194,8 @@ static void handleButton() {
         }
     }
     if (g_tapPending && millis() - g_tapTime > 500) {
-        Serial.println("[btn] single-tap -> toggle");
-        toggleCapture();
+        Serial.println("[btn] single-tap -> cycle mode");
+        cycleCaptureMode();
         g_tapPending = false;
     }
 }
@@ -573,7 +576,7 @@ static void enterMscMode() {
 
 static void drawCrab(bool frame1, bool capturing, bool isBLE) {
     const uint16_t *rows = frame1 ? CRAB_F1 : CRAB_F0;
-    const uint16_t color = g_mode == DeviceMode::DETECTION ? COL_DETECT :
+    const uint16_t color = (g_mode == DeviceMode::DETECTION || g_detectionSelected) ? COL_DETECT :
                            (capturing ? COL_CAP : modeColor(isBLE));
 
     int16_t shake = 0;
@@ -706,7 +709,7 @@ static void drawStars(bool capturing) {
     for (int i = 0; i < STAR_COUNT; i++) {
         uint8_t b = stars[i].bright;
         uint16_t col;
-        if (g_mode == DeviceMode::DETECTION) {
+        if (g_mode == DeviceMode::DETECTION || g_detectionSelected) {
             col = g_canvas->color565(b >> 1, 0, b >> 1);  // purple tint
         } else if (capturing) {
             col = g_canvas->color565(b, b >> 2, b);
@@ -723,7 +726,7 @@ static void drawTitleBar(bool capturing, bool isBLE) {
     uint16_t tcolor;
     const char *title;
 
-    if (g_mode == DeviceMode::DETECTION) {
+    if (g_mode == DeviceMode::DETECTION || g_detectionSelected) {
         tcolor = COL_DETECT;
         title = "AUTOHUNT MODE";
     } else if (capturing) {
@@ -755,7 +758,7 @@ static void drawStatusBar(bool capturing, bool isBLE) {
         0,
         ANIM_Y1,
         SCREEN_W,
-        capturing ? COL_CAP : (g_mode == DeviceMode::DETECTION ? COL_DETECT : modeColor(isBLE))
+        capturing ? COL_CAP : ((g_mode == DeviceMode::DETECTION || g_detectionSelected) ? COL_DETECT : modeColor(isBLE))
     );
 
     g_canvas->setTextSize(1);
@@ -795,6 +798,9 @@ static void drawStatusBar(bool capturing, bool isBLE) {
         if (g_mode == DeviceMode::DETECTION) {
             g_canvas->setTextColor(COL_DETECT);
             g_canvas->print("DETECTION ACTIVE");
+        } else if (g_detectionSelected) {
+            g_canvas->setTextColor(COL_DETECT);
+            g_canvas->print("AUTOHUNT READY");
         } else {
             g_canvas->setTextColor(modeColor(isBLE));
             g_canvas->print(isBLE ? "BLE READY" : "WIFI READY");
@@ -820,6 +826,9 @@ static void drawIdleHint(bool isBLE) {
 
         if (g_mode == DeviceMode::DETECTION) {
             hint = "HUNTING ON WIFI+BLE";
+            color = COL_DETECT;
+        } else if (g_detectionSelected) {
+            hint = "START AUTOHUNT";
             color = COL_DETECT;
         } else {
             hint = isBLE ? "START BLE PCAP" : "START WIFI PCAP";
@@ -1157,11 +1166,17 @@ static void ledUpdate() {
         return;
     }
 
-    // Detection mode: purple pulsing LED
+    // Detection mode: purple pulsing LED (active or idle)
     if (g_mode == DeviceMode::DETECTION && g_detectionMode) {
         float phase = (float)(now % 1000) / 1000.0f;
         uint8_t pulse = (uint8_t)(sinf(phase * 6.2832f) * 100.0f + 128.0f);
-        neopixelWrite(LED_PIN, 0, pulse, pulse);  // Purple (G+B on this hardware = purple)
+        neopixelWrite(LED_PIN, 0, pulse, pulse);
+        return;
+    }
+    if (g_detectionSelected && g_mode == DeviceMode::STOPPED) {
+        float phase = (float)(now % 2000) / 2000.0f;
+        uint8_t b = (uint8_t)(sinf(phase * 6.2832f) * 40.0f + 50.0f);
+        neopixelWrite(LED_PIN, 0, b, b);
         return;
     }
 
@@ -1860,9 +1875,31 @@ void stopCapture() {
     Serial.println("[capture] stopped");
 }
 
+void startDetection() {
+    g_mode = DeviceMode::DETECTION;
+    g_detectionMode = true;
+    Serial.println("[detect] starting detection mode");
+}
+
+void stopDetection() {
+    timerStop(g_hopTimer);
+    esp_wifi_set_promiscuous(false);
+    esp_wifi_set_promiscuous_rx_cb(nullptr);
+    if (g_bleReady) {
+        esp_ble_gap_stop_scanning();
+    }
+    g_mode = DeviceMode::STOPPED;
+    g_detectionMode = false;
+    Serial.println("[detect] detection stopped");
+}
+
 void toggleCapture() {
     if (g_mode == DeviceMode::CAPTURING) {
         stopCapture();
+    } else if (g_mode == DeviceMode::DETECTION) {
+        stopDetection();
+    } else if (g_detectionSelected) {
+        startDetection();
     } else {
         startCapture();
     }
@@ -1880,24 +1917,22 @@ void switchCaptureMode() {
 }
 
 void cycleCaptureMode() {
-    // Cycle: WIFI idle -> BLE idle -> DETECTION -> WIFI idle -> ...
+    // Cycle: WIFI idle -> BLE idle -> DETECTION idle -> WIFI idle -> ...
     if (g_mode == DeviceMode::CAPTURING) return;  // no cycling while capturing
 
+    // Stop detection if active before cycling away
     if (g_mode == DeviceMode::DETECTION) {
+        stopDetection();
+    }
+
+    if (g_detectionSelected) {
         // DETECTION -> WIFI idle
-        g_mode = DeviceMode::STOPPED;
-        g_detectionMode = false;
+        g_detectionSelected = false;
         g_captureMode = CaptureMode::WIFI;
-        timerStop(g_hopTimer);
-        esp_wifi_set_promiscuous(false);
-        esp_wifi_set_promiscuous_rx_cb(nullptr);
-        esp_ble_gap_stop_scanning();
         Serial.println("[mode] DETECTION -> WIFI");
     } else if (g_captureMode == CaptureMode::BLE) {
-        // BLE idle -> DETECTION
-        g_mode = DeviceMode::DETECTION;
-        g_detectionMode = true;
-        g_captureMode = CaptureMode::WIFI;  // prevent single-tap from starting BLE pcap
+        // BLE idle -> DETECTION idle (single-tap to start)
+        g_detectionSelected = true;
         Serial.println("[mode] BLE -> DETECTION");
     } else {
         // WIFI idle -> BLE idle
@@ -2038,7 +2073,7 @@ void loop() {
     while (Serial.available()) {
         char c = Serial.read();
         if (c == 's' || c == 'S') toggleCapture();
-        if (c == 'm' || c == 'M') switchCaptureMode();
+        if (c == 'm' || c == 'M') cycleCaptureMode();
     }
 
     handleButton();
