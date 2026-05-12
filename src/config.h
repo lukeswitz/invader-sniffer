@@ -3,6 +3,7 @@
 
 #include <ArduinoJson.h>
 #include <SD_MMC.h>
+#include "flock_oui.h"
 
 struct TargetOUI {
     uint8_t ouiCount;
@@ -12,37 +13,10 @@ struct TargetOUI {
 
 // ---------- Hardcoded special targets (always active) ----------
 
-enum class SpecialHit { NONE, EVIL_BIRD, RAYBAN };
+enum class SpecialHit { NONE, EVIL_BIRD, EVIL_BIRD_RAVEN, RAYBAN };
 
-static const uint8_t EVIL_BIRD_OUIS[][3] = {
-    // Flock Safety
-    {0xB4, 0x1E, 0x52},
-    {0x58, 0x8E, 0x81},
-    {0xEC, 0x1B, 0xBD},
-    {0x90, 0x35, 0xEA},
-    {0x04, 0x0D, 0x84},
-    {0xF0, 0x82, 0xC0},
-    {0x1C, 0x34, 0xF1},
-    {0x38, 0x5B, 0x44},
-    {0x94, 0x34, 0x69},
-    {0xB4, 0xE3, 0xF9},
-    {0x70, 0xC9, 0x4E},
-    {0x3C, 0x91, 0x80},
-    {0xD8, 0xF3, 0xBC},
-    {0x80, 0x30, 0x49},
-    {0x14, 0x5A, 0xFC},
-    {0x74, 0x4C, 0xA1},
-    {0x08, 0x3A, 0x88},
-    {0x9C, 0x2F, 0x9D},
-    {0x94, 0x08, 0x53},
-    {0xE4, 0xAA, 0xEA},
-    // Flock contract manufacturers
-    {0xF4, 0x6A, 0xDD},
-    {0xF8, 0xA2, 0xD6},
-    {0xE0, 0x0A, 0xF6},
-    {0x00, 0xF4, 0x8D},
-    {0xD0, 0x39, 0x57},
-    {0xE8, 0xD0, 0xFC},
+// Non-Flock surveillance vendor OUIs (linear scan, small list)
+static const uint8_t SURV_VENDOR_OUIS[][3] = {
     // SoundThinking (ShotSpotter)
     {0xD4, 0x11, 0xD6},
     // Neology
@@ -56,8 +30,8 @@ static const uint8_t EVIL_BIRD_OUIS[][3] = {
     // Leonardo UK Ltd
     {0x00, 0x80, 0xE7},
 };
-static constexpr int EVIL_BIRD_OUI_COUNT =
-    (int)(sizeof(EVIL_BIRD_OUIS) / sizeof(EVIL_BIRD_OUIS[0]));
+static constexpr int SURV_VENDOR_OUI_COUNT =
+    (int)(sizeof(SURV_VENDOR_OUIS) / sizeof(SURV_VENDOR_OUIS[0]));
 
 static const uint8_t RAYBAN_OUIS[][3] = {
     {0x7C, 0x2A, 0x9E},
@@ -78,22 +52,47 @@ static const char* const EVIL_BIRD_NAMES[] = {
 static constexpr int EVIL_BIRD_NAME_COUNT =
     (int)(sizeof(EVIL_BIRD_NAMES) / sizeof(EVIL_BIRD_NAMES[0]));
 
-// Mask the top 2 bits of the first byte before comparing — they encode the
-// BLE random-address type and are not part of the OUI.  This lets the spoofer
-// (which must set those bits to 11 for static-random addresses) still trigger
-// detection for OUIs whose natural first byte doesn't already have bits 7:6=11.
-static inline uint8_t ouiByte0(uint8_t b) { return b & 0x3Fu; }
-
+// Check OUI against Flock (bucket-indexed) + surveillance vendors + RayBan.
+// Uses masked matching to handle BLE random-address top-2-bit encoding.
 inline SpecialHit checkSpecialOUI(const uint8_t* bda) {
     if (!bda) return SpecialHit::NONE;
-    for (int i = 0; i < EVIL_BIRD_OUI_COUNT; i++) {
-        if (ouiByte0(bda[0]) == ouiByte0(EVIL_BIRD_OUIS[i][0]) &&
-            bda[1] == EVIL_BIRD_OUIS[i][1] &&
-            bda[2] == EVIL_BIRD_OUIS[i][2])
+    // Flock OUI: bucket-indexed, with BLE random-address masking
+    if (flockMatchOuiMasked(bda)) return SpecialHit::EVIL_BIRD;
+    // Non-Flock surveillance vendors (small list, linear)
+    uint8_t m0 = bda[0] & 0x3Fu;
+    for (int i = 0; i < SURV_VENDOR_OUI_COUNT; i++) {
+        uint8_t v0 = SURV_VENDOR_OUIS[i][0] & 0x3Fu;
+        if (m0 == v0 &&
+            bda[1] == SURV_VENDOR_OUIS[i][1] &&
+            bda[2] == SURV_VENDOR_OUIS[i][2])
+            return SpecialHit::EVIL_BIRD;
+    }
+    // RayBan / Meta
+    for (int i = 0; i < RAYBAN_OUI_COUNT; i++) {
+        uint8_t r0 = RAYBAN_OUIS[i][0] & 0x3Fu;
+        if (m0 == r0 &&
+            bda[1] == RAYBAN_OUIS[i][1] &&
+            bda[2] == RAYBAN_OUIS[i][2])
+            return SpecialHit::RAYBAN;
+    }
+    return SpecialHit::NONE;
+}
+
+// ISR-safe variant for WiFi promiscuous callback (no lazy init).
+inline SpecialHit checkSpecialOUI_ISR(const uint8_t* bda) {
+    if (!bda) return SpecialHit::NONE;
+    if (flockMatchOuiMaskedISR(bda)) return SpecialHit::EVIL_BIRD;
+    uint8_t m0 = bda[0] & 0x3Fu;
+    for (int i = 0; i < SURV_VENDOR_OUI_COUNT; i++) {
+        uint8_t v0 = SURV_VENDOR_OUIS[i][0] & 0x3Fu;
+        if (m0 == v0 &&
+            bda[1] == SURV_VENDOR_OUIS[i][1] &&
+            bda[2] == SURV_VENDOR_OUIS[i][2])
             return SpecialHit::EVIL_BIRD;
     }
     for (int i = 0; i < RAYBAN_OUI_COUNT; i++) {
-        if (ouiByte0(bda[0]) == ouiByte0(RAYBAN_OUIS[i][0]) &&
+        uint8_t r0 = RAYBAN_OUIS[i][0] & 0x3Fu;
+        if (m0 == r0 &&
             bda[1] == RAYBAN_OUIS[i][1] &&
             bda[2] == RAYBAN_OUIS[i][2])
             return SpecialHit::RAYBAN;
@@ -124,9 +123,28 @@ static bool matchWildcardCI(const char* pat, const char* str) {
 
 inline SpecialHit checkSpecialName(const char* name) {
     if (!name || !name[0]) return SpecialHit::NONE;
+    // Hardcoded wildcard patterns (from config.h)
     for (int i = 0; i < EVIL_BIRD_NAME_COUNT; i++) {
         if (matchWildcardCI(EVIL_BIRD_NAMES[i], name))
             return SpecialHit::EVIL_BIRD;
+    }
+    // Flock BLE name patterns (substring, from flock_oui.h)
+    if (flockCheckName(name)) return SpecialHit::EVIL_BIRD;
+    return SpecialHit::NONE;
+}
+
+// Check BLE advertisement for Flock manufacturer ID or Raven service UUIDs.
+// Call with raw adv data from Bluedroid scan result.
+inline SpecialHit checkFlockBleAdv(const uint8_t* adv, uint8_t advLen) {
+    if (!adv || advLen == 0) return SpecialHit::NONE;
+    // Manufacturer company ID
+    uint16_t mfgId;
+    if (flockExtractMfgID(adv, advLen, &mfgId) && flockCheckMfgID(mfgId)) {
+        return SpecialHit::EVIL_BIRD;
+    }
+    // Raven gunshot detector service UUIDs
+    if (flockCheckRavenAdvUUIDs(adv, advLen)) {
+        return SpecialHit::EVIL_BIRD_RAVEN;
     }
     return SpecialHit::NONE;
 }

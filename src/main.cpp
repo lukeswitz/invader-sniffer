@@ -514,7 +514,7 @@ static void updateMscFooter(const char *hint, uint16_t color) {
 }
 
 static void enterMscMode() {
-    drawMscScreen("Initialising SD...", "", RGB565_WHITE);
+    drawMscScreen("Begin SD...", "", RGB565_WHITE);
 
     if (!initSD()) {
         drawMscScreen("SD card failed!", "Check card and reboot", RGB565_RED);
@@ -636,7 +636,6 @@ static void drawEvilBird(bool frame1, bool capturing, bool isBLE) {
         }
     }
 
-    // "FLOCK" label above the bird
     g_canvas->setTextSize(2);
     g_canvas->setTextColor(0xF800);
     const char *flock = "FLOCK";
@@ -1131,15 +1130,25 @@ static void ledUpdate() {
         static uint32_t lastFlash = 0;
         static bool flashState = false;
 
-        if (g_specialType == SpecialHit::EVIL_BIRD) {
+        if (g_specialType == SpecialHit::EVIL_BIRD ||
+            g_specialType == SpecialHit::EVIL_BIRD_RAVEN) {
             if (now - lastFlash > 50) {
                 lastFlash = now;
                 flashState = !flashState;
-                neopixelWrite(LED_PIN,
-                    0,
-                    flashState ? 255 : 40,
-                    0
-                );
+                if (g_specialType == SpecialHit::EVIL_BIRD_RAVEN) {
+                    // Raven gunshot detector: red+blue strobe
+                    neopixelWrite(LED_PIN,
+                        flashState ? 255 : 0,
+                        0,
+                        flashState ? 0 : 255
+                    );
+                } else {
+                    neopixelWrite(LED_PIN,
+                        0,
+                        flashState ? 255 : 40,
+                        0
+                    );
+                }
             }
         } else if (g_specialType == SpecialHit::RAYBAN) {
             // Creeper glassess neopixel
@@ -1226,7 +1235,8 @@ static void renderFrame() {
 
     g_canvas->fillScreen(RGB565_BLACK);
     drawStars(capturing);
-    if (g_specialType == SpecialHit::EVIL_BIRD) {
+    if (g_specialType == SpecialHit::EVIL_BIRD ||
+        g_specialType == SpecialHit::EVIL_BIRD_RAVEN) {
         drawEvilBird(g_crabFrame, capturing, isBLE);
     } else if (g_specialType == SpecialHit::RAYBAN) {
         drawSunglasses();
@@ -1328,36 +1338,86 @@ void wifiSniffer(void *buf, wifi_promiscuous_pkt_type_t type) {
         payload_len -= 4u;
     }
 
-    // Extract source MAC from frame header (offset 10 in 802.11)
     const uint8_t *frame = ppkt->payload;
-    if (payload_len >= 16) {
-        const uint8_t *src_mac = frame + 10;
-        if (g_ouiConfig.isTarget(src_mac)) {
-            g_targetHit = true;
-            Serial.printf("[target] WiFi MAC hit: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                src_mac[0], src_mac[1], src_mac[2],
-                src_mac[3], src_mac[4], src_mac[5]);
+    if (payload_len < 24) goto do_capture;
+
+    {
+        // 802.11 frame: addr1=DA(4), addr2=SA(10), addr3=BSSID(16)
+        const uint8_t *addr1 = frame + 4;
+        const uint8_t *addr2 = frame + 10;
+        const uint8_t *addr3 = frame + 16;
+        uint8_t frameType = (frame[0] >> 2) & 0x03;
+        uint8_t frameSubtype = (frame[0] >> 4) & 0x0F;
+
+        // Multi-address OUI matching (ISR-safe, bucket-indexed)
+        // Check addr2 (source) first — most common hit
+        const uint8_t *matchMac = nullptr;
+        bool isWildcardProbe = false;
+
+        if (flockMatchOuiMaskedISR(addr2)) {
+            matchMac = addr2;
+            // Check for wildcard probe request (subtype 4 = probe req)
+            if (frameType == 0 && frameSubtype == 4) {
+                int bodyOff = 24;
+                int bodyLen = (int)payload_len - bodyOff;
+                const uint8_t* body = frame + bodyOff;
+                int r = (bodyLen > 0) ? isWildcardProbeIE(body, bodyLen) : -1;
+                if (r == -1 && bodyLen > 4) r = isWildcardProbeIE(body, bodyLen - 4);
+                if (r == 1) isWildcardProbe = true;
+            }
+        } else if (!(addr1[0] & 0x01) && flockMatchOuiMaskedISR(addr1)) {
+            // addr1 unicast destination
+            matchMac = addr1;
+        } else if (frameType == 0 && flockMatchOuiMaskedISR(addr3)) {
+            // addr3 in management frames (BSSID)
+            matchMac = addr3;
         }
-        SpecialHit special = checkSpecialOUI(src_mac);
-        if (special != SpecialHit::NONE) {
+
+        // Check all three addresses against user config + special OUIs
+        bool targetFound = false;
+        const uint8_t *addrs[] = { addr2, addr1, addr3 };
+        for (int a = 0; a < 3 && !targetFound; a++) {
+            if (g_ouiConfig.isTarget(addrs[a])) {
+                g_targetHit = true;
+                targetFound = true;
+                Serial.printf("[target] WiFi MAC hit (addr%d): %02X:%02X:%02X:%02X:%02X:%02X\n",
+                    a + 1, addrs[a][0], addrs[a][1], addrs[a][2],
+                    addrs[a][3], addrs[a][4], addrs[a][5]);
+            }
+            SpecialHit special = checkSpecialOUI_ISR(addrs[a]);
+            if (special != SpecialHit::NONE) {
+                g_targetHit = true;
+                g_specialType = special;
+                targetFound = true;
+            }
+        }
+
+        // Flock OUI match from multi-address check
+        if (matchMac && !targetFound) {
             g_targetHit = true;
-            g_specialType = special;
-            Serial.printf("[special] WiFi special OUI hit: %02X:%02X:%02X\n",
-                src_mac[0], src_mac[1], src_mac[2]);
+            g_specialType = SpecialHit::EVIL_BIRD;
+            targetFound = true;
+            if (isWildcardProbe) {
+                Serial.printf("[flock] wildcard probe: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                    matchMac[0], matchMac[1], matchMac[2],
+                    matchMac[3], matchMac[4], matchMac[5]);
+            }
         }
 
         // Check SSID against target name patterns
-        if (!g_targetHit) {
+        if (!targetFound) {
             char ssid[33] = {0};
             if (extractSSID(frame, payload_len, ssid, sizeof(ssid))) {
                 if (g_ouiConfig.isNameTarget(ssid)) {
                     g_targetHit = true;
+                    targetFound = true;
                     Serial.printf("[target] WiFi SSID match: %s\n", ssid);
                 }
                 SpecialHit nameHit = checkSpecialName(ssid);
                 if (nameHit != SpecialHit::NONE) {
                     g_targetHit = true;
                     g_specialType = nameHit;
+                    targetFound = true;
                     Serial.printf("[special] WiFi SSID match: %s\n", ssid);
                 }
             }
@@ -1372,6 +1432,8 @@ void wifiSniffer(void *buf, wifi_promiscuous_pkt_type_t type) {
             Serial.println("[detect] WiFi target found! Starting WiFi capture...");
         }
     }
+
+do_capture:
 
     if (g_mode == DeviceMode::DETECTION) {
         g_detectionChanPkts[g_detectionHopIndex]++;
@@ -1639,6 +1701,27 @@ static void bleScanResultHandler(
                 g_specialType = nameHit;
                 targetFound = true;
                 Serial.printf("[special] BLE name match: %s\n", bleName);
+            }
+        }
+    }
+
+    // Check manufacturer company ID + Raven gunshot detector UUIDs
+    if (!targetFound && rst->ble_adv && rst->adv_data_len > 0) {
+        SpecialHit advHit = checkFlockBleAdv(rst->ble_adv, rst->adv_data_len);
+        if (advHit != SpecialHit::NONE) {
+            g_targetHit = true;
+            g_specialType = advHit;
+            targetFound = true;
+            if (advHit == SpecialHit::EVIL_BIRD_RAVEN) {
+                const char* fw = flockEstimateRavenFW(
+                    rst->ble_adv, rst->adv_data_len);
+                Serial.printf("[flock] Raven gunshot detector FW:%s  %02X:%02X:%02X:%02X:%02X:%02X\n",
+                    fw, rst->bda[0], rst->bda[1], rst->bda[2],
+                    rst->bda[3], rst->bda[4], rst->bda[5]);
+            } else {
+                Serial.printf("[flock] BLE mfg ID hit: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                    rst->bda[0], rst->bda[1], rst->bda[2],
+                    rst->bda[3], rst->bda[4], rst->bda[5]);
             }
         }
     }
@@ -2029,6 +2112,7 @@ void setup() {
         while (true) delay(1000);
     }
 
+    flockOuiInitBuckets();
     g_ouiConfig.load();
 
     g_cfgServer = new ConfigServer(g_ouiConfig);
