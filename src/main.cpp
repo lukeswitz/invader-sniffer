@@ -61,6 +61,11 @@ static constexpr uint32_t LINKTYPE_BLUETOOTH_LE_LL_WITH_PHDR = 256u;
 static volatile uint32_t g_crabShakeTime = 0;
 static volatile int g_crabShakeAmount = 0;
 
+static constexpr uint8_t BL_BRIGHT_FULL = 255;
+static constexpr uint8_t BL_BRIGHT_DIM  = 80;
+static uint8_t g_blTarget = BL_BRIGHT_DIM;
+static uint8_t g_blCurrent = 255;
+
 static constexpr uint16_t COL_IDLE = 0x07E0;
 static constexpr uint16_t COL_CAP = 0xF81F;
 static constexpr uint16_t COL_DIM = 0x2945;
@@ -81,6 +86,17 @@ volatile DeviceMode g_mode = DeviceMode::STOPPED;
 volatile bool g_detectionMode = false;
 static bool g_detectionSelected = false;
 
+static void updateBacklight() {
+    uint8_t target = (g_mode == DeviceMode::STOPPED) ? BL_BRIGHT_DIM : BL_BRIGHT_FULL;
+    if (target != g_blTarget) {
+        g_blTarget = target;
+    }
+    if (g_blCurrent != g_blTarget) {
+        if (g_blCurrent < g_blTarget) g_blCurrent += min((uint8_t)15, (uint8_t)(g_blTarget - g_blCurrent));
+        else                          g_blCurrent -= min((uint8_t)15, (uint8_t)(g_blCurrent - g_blTarget));
+        analogWrite(GFX_BL, g_blCurrent);
+    }
+}
 
 static constexpr int BOOT_BTN = 0;
 
@@ -1261,6 +1277,7 @@ static void renderFrame() {
     drawStatusBar(capturing, isBLE);
     g_canvas->flush();
     ledUpdate();
+    updateBacklight();
 }
 
 // --------------------- Packet Sniffing
@@ -1550,6 +1567,15 @@ bool initBLE() {
 
     Serial.println("[ble] Bluedroid initialised");
     g_bleReady = true;
+    return true;
+}
+
+static bool ensureBLE() {
+    if (g_bleReady) return true;
+    if (!initBLE()) {
+        Serial.println("[ble] lazy init failed");
+        return false;
+    }
     return true;
 }
 
@@ -1897,7 +1923,7 @@ bool startCapture() {
     g_bleSeenPos = 0;
 
     if (g_captureMode == CaptureMode::BLE) {
-        if (!g_bleReady) {
+        if (!ensureBLE()) {
             Serial.println("[ble] not ready");
             closePcap();
             return false;
@@ -2084,7 +2110,8 @@ void setup() {
     gfx->setRotation(0);
     gfx->fillScreen(RGB565_BLACK);
     pinMode(GFX_BL, OUTPUT);
-    digitalWrite(GFX_BL, HIGH);
+    analogWrite(GFX_BL, BL_BRIGHT_DIM);
+    g_blCurrent = BL_BRIGHT_DIM;
 
     g_canvas = new Arduino_Canvas(SCREEN_W, SCREEN_H, gfx, 0, 0, 0);
     if (!g_canvas->begin(GFX_SKIP_OUTPUT_BEGIN)) {
@@ -2102,15 +2129,7 @@ void setup() {
         while (true) delay(1000);
     }
 
-    if (!initBLE()) {
-        g_canvas->fillScreen(RGB565_BLACK);
-        g_canvas->setTextSize(2);
-        g_canvas->setTextColor(RGB565_RED);
-        g_canvas->setCursor(10, 148);
-        g_canvas->print("BLE FAILED");
-        g_canvas->flush();
-        while (true) delay(1000);
-    }
+    // BLE init deferred to first use (saves ~30-50mA idle power)
 
     flockOuiInitBuckets();
     g_ouiConfig.load();
@@ -2154,6 +2173,7 @@ void setup() {
     timerAttachInterrupt(g_hopTimer, &hopISR, true);
     timerAlarmWrite(g_hopTimer, 250000, true);
     timerAlarmEnable(g_hopTimer);
+    timerStop(g_hopTimer);  // armed but stopped — started on capture/detection
 
     WiFi.mode(WIFI_MODE_NULL);
 
@@ -2199,7 +2219,7 @@ void loop() {
 
         // BLE scanning simultaneously — scan_window < scan_interval
         // lets ESP32 coexistence arbiter share the radio with WiFi
-        if (g_bleReady) {
+        if (ensureBLE()) {
             static const esp_ble_scan_params_t det_scan_params = {
                 .scan_type          = BLE_SCAN_TYPE_PASSIVE,
                 .own_addr_type      = BLE_ADDR_TYPE_PUBLIC,
@@ -2263,11 +2283,12 @@ void loop() {
     }
 
     uint32_t now = millis();
-    if (now - lastFrame >= 33) {
+    uint32_t frameInterval = (g_mode == DeviceMode::STOPPED) ? 100 : 33;
+    if (now - lastFrame >= frameInterval) {
         lastFrame = now;
         renderFrame();
     } else {
-        delay(5);
+        delay(g_mode == DeviceMode::STOPPED ? 20 : 5);
     }
 
     if (now - lastAlive >= 2000) {
